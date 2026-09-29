@@ -10,6 +10,7 @@ from ...config import settings
 from .security import verify_password,hash_password,create_access_token,create_refresh_token,hash_refresh_token
 from .dependencies import current_user,require_roles,require_permission
 from .audit import record
+from ..crm.models import Pipeline,PipelineStage
 router=APIRouter()
 def issue_session(db:Session,user:User,roles:list[str])->TokenResponse:
  refresh_token=create_refresh_token()
@@ -22,7 +23,28 @@ def bootstrap(payload:UserCreate,bootstrap_secret:str,db:Session=Depends(get_db)
  org=Organization(name="Sketchitup Solutions");db.add(org);db.flush()
  role=db.scalar(select(Role).where(Role.name=="founder_owner"))
  if not role: role=Role(name="founder_owner",description="Founder / Owner");db.add(role);db.flush()
- target=User(organization_id=org.id,email=payload.email.lower(),display_name=payload.display_name,password_hash=hash_password(payload.password),status="active");db.add(target);db.flush();db.add(UserRole(user_id=target.id,role_id=role.id));record(db,org.id,target.id,"bootstrap","user",target.id);db.commit();db.refresh(target);return target
+ target=User(organization_id=org.id,email=payload.email.lower(),display_name=payload.display_name,password_hash=hash_password(payload.password),status="active");db.add(target);db.flush();db.add(UserRole(user_id=target.id,role_id=role.id))
+    pipeline=Pipeline(organization_id=org.id,name="Default Sales",description="Default CRM sales pipeline",is_active=True)
+    db.add(pipeline);db.flush()
+    stages=[
+        ("New",1,10,False,False),
+        ("Contacted",2,20,False,False),
+        ("Qualified",3,40,False,False),
+        ("Discovery Done",4,55,False,False),
+        ("Proposal Sent",5,70,False,False),
+        ("Negotiation",6,85,False,False),
+        ("Won (Converted)",7,100,True,False),
+        ("Lost (Closed)",8,0,False,True),
+        ("On Hold",9,0,False,False),
+    ]
+    for name,position,probability,is_won,is_lost in stages:
+        db.add(PipelineStage(
+            organization_id=org.id,pipeline_id=pipeline.id,name=name,
+            position=position,probability=probability,
+            is_closed_won=is_won,is_closed_lost=is_lost
+        ))
+    record(db,org.id,target.id,"bootstrap","user",target.id)
+    db.commit();db.refresh(target);return target
 @router.post("/auth/login",response_model=TokenResponse)
 def login(payload:LoginRequest,db:Session=Depends(get_db)):
  email=payload.email.lower(); now=datetime.now(timezone.utc); window=now-timedelta(minutes=15)
