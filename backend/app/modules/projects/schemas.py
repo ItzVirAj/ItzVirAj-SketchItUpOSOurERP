@@ -4,6 +4,7 @@ from pydantic import BaseModel,Field
 class ProjectCreate(BaseModel):
  name:str=Field(min_length=1,max_length=200)
  client_name:str|None=Field(default=None,max_length=200)
+ client_id:UUID|None=None
  description:str|None=None
  status:str="planned"
  owner_user_id:UUID|None=None
