@@ -58,6 +58,8 @@ class LeadCreate(BaseModel):
     client_id:UUID|None=None
     contact_id:UUID|None=None
     tags:str|None=None
+    lost_reason:str|None=None
+    lost_notes:str|None=None
 
 class LeadUpdate(BaseModel):
     pipeline_id:UUID|None=None
@@ -112,6 +114,12 @@ class FollowUpRead(FollowUpCreate):
     lead_id:UUID
     assigned_user_id:UUID
     completed_at:datetime|None
+
+class LeadConversionRead(BaseModel):
+    lead_id:UUID
+    client_id:UUID
+    contact_id:UUID
+    project_id:UUID
 
 class PipelineRead(BaseModel):
     id:UUID
