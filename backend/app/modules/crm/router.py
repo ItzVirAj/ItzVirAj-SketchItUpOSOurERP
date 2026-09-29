@@ -7,8 +7,9 @@ from ...db import get_db
 from ..core.models import User
 from ..core.dependencies import require_permission
 from ..core.audit import record
+from ..projects.models import Project
 from .models import Client,Contact,Lead,LeadActivity,LeadFollowUp,Pipeline,PipelineStage
-from .schemas import ClientCreate,ClientUpdate,ClientRead,ContactCreate,ContactRead,LeadCreate,LeadUpdate,LeadRead,ActivityCreate,ActivityRead,FollowUpCreate,FollowUpRead,PipelineRead,StageRead
+from .schemas import ClientCreate,ClientUpdate,ClientRead,ContactCreate,ContactRead,LeadCreate,LeadUpdate,LeadRead,ActivityCreate,ActivityRead,FollowUpCreate,FollowUpRead,PipelineRead,StageRead,LeadConversionRead
 
 router=APIRouter()
 
@@ -122,3 +123,72 @@ def list_follow_ups(lead_id:UUID,user:User=Depends(require_permission("crm.read"
     lead=db.scalar(select(Lead).where(Lead.id==lead_id,Lead.organization_id==user.organization_id))
     if not lead: raise HTTPException(404,"Lead not found")
     return db.scalars(select(LeadFollowUp).where(LeadFollowUp.lead_id==lead_id,LeadFollowUp.organization_id==user.organization_id).order_by(LeadFollowUp.due_at)).all()
+
+
+@router.post("/leads/{lead_id}/convert",response_model=LeadConversionRead)
+def convert_lead(lead_id:UUID,user:User=Depends(require_permission("crm.create")),db:Session=Depends(get_db)):
+    lead=db.scalar(select(Lead).where(Lead.id==lead_id,Lead.organization_id==user.organization_id))
+    if not lead:
+        raise HTTPException(404,"Lead not found")
+    stage=db.scalar(select(PipelineStage).where(PipelineStage.id==lead.stage_id,PipelineStage.organization_id==user.organization_id))
+    if not stage or not stage.is_closed_won:
+        raise HTTPException(400,"Only a Won lead can be converted")
+    if lead.client_id:
+        client=org_client(db,user,lead.client_id)
+        if not client:
+            raise HTTPException(400,"Linked client does not belong to your organization")
+    else:
+        client=Client(
+            organization_id=user.organization_id,
+            name=lead.company or lead.name,
+            industry=lead.industry,
+            email=lead.email,
+            phone=lead.phone,
+            notes=lead.requirement_summary,
+            status="active",
+        )
+        db.add(client);db.flush()
+        record(db,user.organization_id,user.id,"create","client",client.id,{"source_lead_id":str(lead.id)})
+
+    if lead.contact_id:
+        contact=db.scalar(select(Contact).where(Contact.id==lead.contact_id,Contact.organization_id==user.organization_id))
+        if not contact:
+            raise HTTPException(400,"Linked contact does not belong to your organization")
+    else:
+        contact=Contact(
+            organization_id=user.organization_id,
+            client_id=client.id,
+            name=lead.name,
+            email=lead.email,
+            phone=lead.phone,
+            is_primary=True,
+        )
+        db.add(contact);db.flush()
+        record(db,user.organization_id,user.id,"create","contact",contact.id,{"source_lead_id":str(lead.id)})
+
+    project=Project(
+        organization_id=user.organization_id,
+        client_id=client.id,
+        client_name=client.name,
+        name=f"{lead.name} — Project",
+        description=lead.requirement_summary,
+        status="planned",
+        owner_user_id=lead.owner_user_id,
+    )
+    db.add(project);db.flush()
+
+    lead.client_id=client.id
+    lead.contact_id=contact.id
+    lead.updated_at=datetime.now(timezone.utc)
+    record(db,user.organization_id,user.id,"convert","lead",lead.id,{
+        "client_id":str(client.id),
+        "contact_id":str(contact.id),
+        "project_id":str(project.id),
+    })
+    db.commit()
+    return LeadConversionRead(
+        lead_id=lead.id,
+        client_id=client.id,
+        contact_id=contact.id,
+        project_id=project.id,
+    )
