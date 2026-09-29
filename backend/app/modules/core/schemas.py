@@ -1,0 +1,7 @@
+from uuid import UUID
+from pydantic import BaseModel,EmailStr,Field
+class LoginRequest(BaseModel): email:EmailStr; password:str=Field(min_length=8)
+class TokenResponse(BaseModel): access_token:str; token_type:str="bearer"
+class UserCreate(BaseModel): email:EmailStr; display_name:str=Field(min_length=1,max_length=200); password:str=Field(min_length=8); organization_id:UUID|None=None; role_ids:list[UUID]=[]
+class UserRead(BaseModel): id:UUID; email:EmailStr; display_name:str; status:str; organization_id:UUID|None
+class RoleRead(BaseModel): id:UUID; name:str; description:str|None
