@@ -1,0 +1,13 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE TABLE organizations(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),deleted_at timestamptz);
+CREATE TABLE roles(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),name text NOT NULL UNIQUE,description text,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE users(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),organization_id uuid REFERENCES organizations(id),email text NOT NULL UNIQUE,display_name text NOT NULL,status text NOT NULL DEFAULT 'active' CHECK(status IN ('active','invited','disabled')),created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),deleted_at timestamptz);
+CREATE TABLE user_roles(user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,role_id uuid NOT NULL REFERENCES roles(id) ON DELETE CASCADE,PRIMARY KEY(user_id,role_id));
+CREATE TABLE audit_logs(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),organization_id uuid REFERENCES organizations(id),actor_user_id uuid REFERENCES users(id),action text NOT NULL,entity_type text NOT NULL,entity_id uuid,metadata jsonb NOT NULL DEFAULT '{}'::jsonb,created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX idx_users_org_status ON users(organization_id,status);
+CREATE INDEX idx_audit_org_created_at ON audit_logs(organization_id,created_at DESC);
+ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
