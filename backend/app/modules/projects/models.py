@@ -8,6 +8,7 @@ class Project(BaseModel):
  id:Mapped[UUID]=mapped_column(primary_key=True)
  organization_id:Mapped[UUID]=mapped_column(ForeignKey("organizations.id"))
  client_name:Mapped[str|None]=mapped_column(String(200))
+ client_id:Mapped[UUID|None]=mapped_column(ForeignKey("clients.id",ondelete="SET NULL"))
  name:Mapped[str]=mapped_column(String(200))
  description:Mapped[str|None]=mapped_column(Text)
  status:Mapped[str]=mapped_column(String(30),default="planned")
