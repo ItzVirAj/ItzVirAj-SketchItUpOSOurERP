@@ -9,6 +9,14 @@ class ProjectCreate(BaseModel):
  owner_user_id:UUID|None=None
  start_date:datetime|None=None
  due_date:datetime|None=None
+class ProjectUpdate(BaseModel):
+ name:str|None=Field(default=None,min_length=1,max_length=200)
+ client_name:str|None=Field(default=None,max_length=200)
+ description:str|None=None
+ status:str|None=None
+ owner_user_id:UUID|None=None
+ start_date:datetime|None=None
+ due_date:datetime|None=None
 class ProjectRead(ProjectCreate):
  id:UUID
  organization_id:UUID
@@ -19,6 +27,13 @@ class TaskCreate(BaseModel):
  description:str|None=None
  status:str="todo"
  priority:str="medium"
+ assignee_user_id:UUID|None=None
+ due_date:datetime|None=None
+class TaskUpdate(BaseModel):
+ title:str|None=Field(default=None,min_length=1,max_length=240)
+ description:str|None=None
+ status:str|None=None
+ priority:str|None=None
  assignee_user_id:UUID|None=None
  due_date:datetime|None=None
 class TaskRead(TaskCreate):
