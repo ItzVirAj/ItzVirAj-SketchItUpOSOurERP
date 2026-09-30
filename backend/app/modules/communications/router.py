@@ -9,6 +9,7 @@ from ..core.dependencies import require_permission
 from ..core.audit import record
 from .models import Channel, ChannelMember, Message
 from .schemas import ChannelCreate, ChannelRead, MessageCreate, MessageRead, MemberAdd
+from ..notifications.service import create_notification
 
 router=APIRouter()
 
@@ -46,6 +47,7 @@ def add_member(channel_id:UUID,payload:MemberAdd,user:User=Depends(require_permi
   raise HTTPException(409,"User is already a channel member")
  db.add(ChannelMember(channel_id=channel.id,user_id=payload.user_id))
  record(db,user.organization_id,user.id,"add_member","communication_channel",channel.id,{"user_id":str(payload.user_id)})
+ create_notification(db,user.organization_id,payload.user_id,"communications.channel_member_added","Added to private channel",f"You were added to #{channel.name}.","communication_channel",channel.id,f"/communications/channels/{channel.id}")
  db.commit();return {"channel_id":channel.id,"user_id":payload.user_id}
 
 @router.get("/channels/{channel_id}/messages",response_model=list[MessageRead])
@@ -65,6 +67,14 @@ def send_message(channel_id:UUID,payload:MessageCreate,user:User=Depends(require
  if not message.body: raise HTTPException(400,"Message body cannot be empty")
  db.add(message);db.flush()
  record(db,user.organization_id,user.id,"create","communication_message",message.id,{"channel_id":str(channel.id)})
+ member_ids=db.scalars(select(ChannelMember.user_id).where(ChannelMember.channel_id==channel.id,ChannelMember.user_id!=user.id)).all()
+ if channel.channel_type=="private":
+  recipients=member_ids
+ else:
+  recipients=db.scalars(select(User.id).where(User.organization_id==user.organization_id,User.status=="active",User.id!=user.id)).all()
+ preview=message.body if len(message.body)<=120 else message.body[:117]+"..."
+ for recipient_id in recipients:
+  create_notification(db,user.organization_id,recipient_id,"communications.message",f"New message in #{channel.name}",f"{user.display_name}: {preview}","communication_message",message.id,f"/communications/channels/{channel.id}")
  db.commit();db.refresh(message);return message
 
 @router.patch("/messages/{message_id}",response_model=MessageRead)
