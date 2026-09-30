@@ -48,3 +48,22 @@ class MarketingMetric(BaseModel):
 class BrandAsset(BaseModel):
  __tablename__="marketing_brand_assets"
  id:Mapped[UUID]=mapped_column(primary_key=True,default=uuid4); organization_id:Mapped[UUID]=mapped_column(ForeignKey("organizations.id",ondelete="CASCADE")); name:Mapped[str]=mapped_column(String(240)); asset_type:Mapped[str]=mapped_column(String(60)); storage_url:Mapped[str|None]=mapped_column(String(1000)); description:Mapped[str|None]=mapped_column(Text); created_by_user_id:Mapped[UUID|None]=mapped_column(ForeignKey("users.id",ondelete="SET NULL")); created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc)); updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+
+
+class Outreach(BaseModel):
+ __tablename__="marketing_outreach"
+ id:Mapped[UUID]=mapped_column(primary_key=True,default=uuid4)
+ organization_id:Mapped[UUID]=mapped_column(ForeignKey("organizations.id",ondelete="CASCADE"))
+ lead_id:Mapped[UUID|None]=mapped_column(ForeignKey("leads.id",ondelete="SET NULL"))
+ campaign_id:Mapped[UUID|None]=mapped_column(ForeignKey("marketing_campaigns.id",ondelete="SET NULL"))
+ owner_user_id:Mapped[UUID|None]=mapped_column(ForeignKey("users.id",ondelete="SET NULL"))
+ contact_name:Mapped[str]=mapped_column(String(200))
+ company:Mapped[str|None]=mapped_column(String(240))
+ contact_method:Mapped[str]=mapped_column(String(30),default="email")
+ target:Mapped[str|None]=mapped_column(String(500))
+ status:Mapped[str]=mapped_column(String(30),default="planned")
+ last_contacted_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
+ next_follow_up_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
+ notes:Mapped[str|None]=mapped_column(Text)
+ created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+ updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
