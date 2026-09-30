@@ -110,7 +110,7 @@ async def send_message(channel_id:UUID,payload:MessageCreate,user:User=Depends(r
  return message
 
 @router.patch("/messages/{message_id}",response_model=MessageRead)
-def edit_message(message_id:UUID,payload:MessageCreate,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
+async def edit_message(message_id:UUID,payload:MessageCreate,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
  message=db.scalar(select(Message).where(Message.id==message_id,Message.organization_id==user.organization_id))
  if not message: raise HTTPException(404,"Message not found")
  if message.sender_user_id!=user.id: raise HTTPException(403,"You can only edit your own messages")
@@ -118,4 +118,10 @@ def edit_message(message_id:UUID,payload:MessageCreate,user:User=Depends(require
  if not body: raise HTTPException(400,"Message body cannot be empty")
  message.body=body;message.is_edited=True;message.updated_at=datetime.now(timezone.utc)
  record(db,user.organization_id,user.id,"update","communication_message",message.id)
- db.commit();db.refresh(message);return message
+ db.commit();db.refresh(message)
+ recipients=db.scalars(select(ChannelMember.user_id).where(ChannelMember.channel_id==message.channel_id,ChannelMember.user_id!=user.id)).all()
+ if message.channel_id:
+  event={"type":"message.updated","channel_id":str(message.channel_id),"message":{"id":str(message.id),"sender_user_id":str(message.sender_user_id),"body":message.body,"is_edited":message.is_edited,"updated_at":message.updated_at.isoformat()}}
+  if not await bus.publish(recipients,event):
+   await manager.broadcast(recipients,event)
+ return message
