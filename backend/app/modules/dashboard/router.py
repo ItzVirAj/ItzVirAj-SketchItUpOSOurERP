@@ -3,7 +3,7 @@ from fastapi import APIRouter,Depends
 from sqlalchemy import select,func
 from sqlalchemy.orm import Session
 from ...db import get_db
-from ..core.models import User
+from ..core.models import User,AuditLog
 from ..core.dependencies import require_permission
 from ..projects.models import Project,Task
 from ..calendar.models import Event
@@ -13,6 +13,13 @@ from ..finance.models import Invoice,Payment
 from ..finance.expense_models import Expense
 
 router=APIRouter()
+
+
+@router.get("/activity")
+def recent_activity(user:User=Depends(require_permission("dashboard.read")),db:Session=Depends(get_db),limit:int=20):
+ limit=max(1,min(limit,50))
+ rows=db.scalars(select(AuditLog).where(AuditLog.organization_id==user.organization_id).order_by(AuditLog.created_at.desc()).limit(limit)).all()
+ return [{"id":r.id,"action":r.action,"entity_type":r.entity_type,"entity_id":r.entity_id,"metadata":r.metadata_,"created_at":r.created_at} for r in rows]
 
 @router.get("/pipeline")
 def pipeline(user:User=Depends(require_permission("dashboard.read")),db:Session=Depends(get_db)):
