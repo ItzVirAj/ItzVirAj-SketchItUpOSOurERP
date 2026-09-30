@@ -57,16 +57,26 @@ def add_member(channel_id:UUID,payload:MemberAdd,user:User=Depends(require_permi
 
 @router.get("/channels/unread",response_model=list[ChannelUnreadRead])
 def channel_unread_counts(user:User=Depends(require_permission("communications.read")),db:Session=Depends(get_db)):
- channels=db.scalars(select(Channel).where(Channel.organization_id==user.organization_id)).all()
- result=[]
+ channels=db.scalars(select(Channel).where(Channel.organization_id==user.organization_id).order_by(Channel.name.asc())).all()
+ visible=[]
+ private_ids=[]
  for channel in channels:
-  if channel.channel_type!="public" and not can_access(db,user,channel):
-   continue
-  state=db.scalar(select(ChannelReadState).where(ChannelReadState.channel_id==channel.id,ChannelReadState.user_id==user.id))
-  q=select(Message).where(Message.channel_id==channel.id,Message.organization_id==user.organization_id,Message.sender_user_id!=user.id)
-  if state:q=q.where(Message.created_at>state.last_read_at)
-  result.append(ChannelUnreadRead(channel_id=channel.id,unread_count=int(db.scalar(select(func.count()).select_from(q.subquery()))) or 0))
- return result
+  if channel.channel_type=="public":
+   visible.append(channel)
+  elif can_access(db,user,channel):
+   visible.append(channel);private_ids.append(channel.id)
+ if not visible:return []
+ state_expr=select(ChannelReadState.channel_id,ChannelReadState.last_read_at).where(ChannelReadState.user_id==user.id).subquery()
+ unread_q=select(Message.channel_id,func.count(Message.id)).outerjoin(
+  state_expr,state_expr.c.channel_id==Message.channel_id
+ ).where(
+  Message.organization_id==user.organization_id,
+  Message.sender_user_id!=user.id,
+  (state_expr.c.last_read_at.is_(None)) | (Message.created_at>state_expr.c.last_read_at)
+ ).group_by(Message.channel_id)
+ counts={channel_id:int(count) for channel_id,count in db.execute(unread_q).all()}
+ return [ChannelUnreadRead(channel_id=channel.id,unread_count=counts.get(channel.id,0)) for channel in visible]
+
 
 @router.post("/channels/{channel_id}/read")
 def mark_channel_read(channel_id:UUID,user:User=Depends(require_permission("communications.read")),db:Session=Depends(get_db)):
