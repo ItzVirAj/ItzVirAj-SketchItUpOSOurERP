@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, delete, func, and_
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from ...db import get_db
 from ..core.models import User
