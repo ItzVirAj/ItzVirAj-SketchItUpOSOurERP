@@ -53,3 +53,8 @@ class BrandAssetRead(BrandAssetCreate):
 
 class AttributionRead(BaseModel):
  campaign_id:UUID; campaign_name:str; leads:int; won_leads:int; estimated_won_value:float; collected_revenue:float
+
+class ImportRowResult(BaseModel):
+ row:int; status:str; record_id:UUID|None=None; error:str|None=None
+class ImportResult(BaseModel):
+ import_type:str; total_rows:int; created:int; updated:int; failed:int; rows:list[ImportRowResult]
