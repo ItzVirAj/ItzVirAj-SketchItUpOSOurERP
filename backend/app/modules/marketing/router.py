@@ -1,4 +1,4 @@
-from datetime import datetime,timezone,date
+from datetime import datetime,timezone,date,timedelta
 import csv,io
 from uuid import UUID
 from fastapi import APIRouter,Depends,HTTPException,UploadFile,File
@@ -11,7 +11,7 @@ from ..core.audit import record
 from ..crm.models import Lead,PipelineStage
 from ..finance.models import Payment,Invoice
 from ..sales.models import Contract
-from .models import MarketingChannel,Campaign,CampaignChannel,ContentItem,Gig,Bid,MarketingMetric,BrandAsset
+from .models import MarketingChannel,Campaign,CampaignChannel,ContentItem,Gig,Bid,MarketingMetric,BrandAsset,Outreach
 from .schemas import *
 
 CONTENT_TRANSITIONS={"idea":{"draft"},"draft":{"design","review"},"design":{"review"},"review":{"approved","draft"},"approved":{"scheduled","draft"},"scheduled":{"published","approved"},"published":{"repurposed"},"repurposed":set()}
@@ -119,6 +119,34 @@ def import_csv(import_type:str,file:UploadFile=File(...),user:User=Depends(requi
  db.commit()
  return ImportResult(import_type=import_type,total_rows=len(rows),created=created,updated=updated,failed=failed,rows=results)
 
+
+OUTREACH_STATUSES={"planned","contacted","replied","qualified","not_interested","converted","closed"}
+CONTACT_METHODS={"email","linkedin","whatsapp","phone","other"}
+
+def validate_outreach_refs(db,user,data):
+ if data.get("owner_user_id") is not None and not org_user(db,user,data["owner_user_id"]): raise HTTPException(400,"Owner must be an active organization user")
+ if data.get("campaign_id"): require_org(db,user,Campaign,data["campaign_id"])
+ if data.get("lead_id") and not db.scalar(select(Lead.id).where(Lead.id==data["lead_id"],Lead.organization_id==user.organization_id)): raise HTTPException(400,"Referenced lead not found in your organization")
+ if data.get("status") and data["status"] not in OUTREACH_STATUSES: raise HTTPException(400,"Invalid outreach status")
+ if data.get("contact_method") and data["contact_method"] not in CONTACT_METHODS: raise HTTPException(400,"Invalid contact method")
+
+def kpi_period(db,user,start,end):
+ s=datetime.combine(start,datetime.min.time(),tzinfo=timezone.utc); e=datetime.combine(end,datetime.min.time(),tzinfo=timezone.utc)
+ metrics=db.execute(select(func.coalesce(func.sum(MarketingMetric.impressions),0),func.coalesce(func.sum(MarketingMetric.website_visits),0),func.coalesce(func.sum(MarketingMetric.leads),0)).where(MarketingMetric.organization_id==user.organization_id,MarketingMetric.period_start>=start,MarketingMetric.period_start<end)).one()
+ lead_count=db.scalar(select(func.count(Lead.id)).where(Lead.organization_id==user.organization_id,Lead.campaign_id.is_not(None),Lead.created_at>=s,Lead.created_at<e)) or 0
+ won_count=db.scalar(select(func.count(Lead.id)).join(PipelineStage,PipelineStage.id==Lead.stage_id).where(Lead.organization_id==user.organization_id,Lead.campaign_id.is_not(None),PipelineStage.is_closed_won.is_(True),Lead.updated_at>=s,Lead.updated_at<e)) or 0
+ estimated=db.scalar(select(func.coalesce(func.sum(Lead.estimated_value),0)).join(PipelineStage,PipelineStage.id==Lead.stage_id).where(Lead.organization_id==user.organization_id,Lead.campaign_id.is_not(None),PipelineStage.is_closed_won.is_(True),Lead.updated_at>=s,Lead.updated_at<e)) or 0
+ collected=db.scalar(select(func.coalesce(func.sum(Payment.amount),0)).join(Invoice,Invoice.id==Payment.invoice_id).join(Contract,Contract.id==Invoice.contract_id).join(Lead,Lead.id==Contract.lead_id).where(Lead.organization_id==user.organization_id,Lead.campaign_id.is_not(None),Payment.paid_at>=s,Payment.paid_at<e)) or 0
+ published=db.scalar(select(func.count(ContentItem.id)).where(ContentItem.organization_id==user.organization_id,ContentItem.approval_status=="published",ContentItem.publish_at>=s,ContentItem.publish_at<e)) or 0
+ active=db.scalar(select(func.count(Campaign.id)).where(Campaign.organization_id==user.organization_id,Campaign.starts_at<e,(Campaign.ends_at.is_(None)) | (Campaign.ends_at>=s))) or 0
+ gigs=db.scalar(select(func.count(Gig.id)).where(Gig.organization_id==user.organization_id)) or 0
+ bids=db.scalar(select(func.count(Bid.id)).where(Bid.organization_id==user.organization_id,Bid.created_at>=s,Bid.created_at<e)) or 0
+ interviews=db.scalar(select(func.count(Bid.id)).where(Bid.organization_id==user.organization_id,Bid.status=="interview",Bid.updated_at>=s,Bid.updated_at<e)) or 0
+ hires=db.scalar(select(func.count(Bid.id)).where(Bid.organization_id==user.organization_id,Bid.status=="hired",Bid.updated_at>=s,Bid.updated_at<e)) or 0
+ now=datetime.now(timezone.utc);out_total=db.scalar(select(func.count(Outreach.id)).where(Outreach.organization_id==user.organization_id,Outreach.created_at>=s,Outreach.created_at<e)) or 0
+ due=db.scalar(select(func.count(Outreach.id)).where(Outreach.organization_id==user.organization_id,Outreach.next_follow_up_at<=now,Outreach.status.not_in(["converted","closed"]))) or 0
+ overdue=db.scalar(select(func.count(Outreach.id)).where(Outreach.organization_id==user.organization_id,Outreach.next_follow_up_at<now,Outreach.status.not_in(["converted","closed"]))) or 0
+ return MarketingKPIRead(period_start=start,period_end=end,impressions=int(metrics[0] or 0),website_visits=int(metrics[1] or 0),leads=int(lead_count or metrics[2] or 0),won_leads=int(won_count),estimated_won_value=float(estimated),collected_revenue=float(collected),content_published=int(published),active_campaigns=int(active),gigs=int(gigs),bids=int(bids),interviews=int(interviews),hires=int(hires),outreach_total=int(out_total),outreach_due=int(due),outreach_overdue=int(overdue))
 @router.patch("/channels/{channel_id}",response_model=ChannelRead)
 def update_channel(channel_id:UUID,payload:ChannelUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
  obj=require_org(db,user,MarketingChannel,channel_id);data=payload.model_dump(exclude_unset=True)
