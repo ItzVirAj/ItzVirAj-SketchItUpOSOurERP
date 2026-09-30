@@ -19,12 +19,13 @@ def get_channel(db:Session,user:User,channel_id:UUID):
  return db.scalar(select(Channel).where(Channel.id==channel_id,Channel.organization_id==user.organization_id))
 
 def can_access(db:Session,user:User,channel:Channel):
+ if channel.archived_at is not None: return False
  if channel.channel_type=="public": return True
  return db.scalar(select(ChannelMember).where(ChannelMember.channel_id==channel.id,ChannelMember.user_id==user.id)) is not None
 
 @router.get("/channels",response_model=list[ChannelRead])
 def list_channels(user:User=Depends(require_permission("communications.read")),db:Session=Depends(get_db)):
- channels=db.scalars(select(Channel).where(Channel.organization_id==user.organization_id).order_by(Channel.name.asc())).all()
+ channels=db.scalars(select(Channel).where(Channel.organization_id==user.organization_id,Channel.archived_at.is_(None)).order_by(Channel.name.asc())).all()
  return [c for c in channels if c.channel_type=="public" or can_access(db,user,c)]
 
 @router.post("/channels",response_model=ChannelRead,status_code=201)
@@ -38,6 +39,38 @@ def create_channel(payload:ChannelCreate,user:User=Depends(require_permission("c
  db.add(ChannelMember(channel_id=channel.id,user_id=user.id))
  record(db,user.organization_id,user.id,"create","communication_channel",channel.id,{"name":channel.name})
  db.commit();db.refresh(channel);return channel
+
+@router.post("/channels/{channel_id}/archive")
+def archive_channel(channel_id:UUID,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
+ channel=get_channel(db,user,channel_id)
+ if not channel: raise HTTPException(404,"Channel not found")
+ roles=db.scalars(select(Role.name).join(UserRole,UserRole.role_id==Role.id).where(UserRole.user_id==user.id)).all()
+ is_admin=bool(set(roles).intersection({"founder_owner","admin_operations"}))
+ if channel.created_by_user_id!=user.id and not is_admin:
+  raise HTTPException(403,"Only the channel creator or an administrator can archive this channel")
+ if channel.archived_at is not None:
+  raise HTTPException(409,"Channel is already archived")
+ channel.archived_at=datetime.now(timezone.utc)
+ channel.updated_at=datetime.now(timezone.utc)
+ record(db,user.organization_id,user.id,"archive","communication_channel",channel.id)
+ db.commit()
+ return {"channel_id":channel.id,"archived_at":channel.archived_at}
+
+@router.post("/channels/{channel_id}/unarchive")
+def unarchive_channel(channel_id:UUID,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
+ channel=db.scalar(select(Channel).where(Channel.id==channel_id,Channel.organization_id==user.organization_id))
+ if not channel: raise HTTPException(404,"Channel not found")
+ roles=db.scalars(select(Role.name).join(UserRole,UserRole.role_id==Role.id).where(UserRole.user_id==user.id)).all()
+ is_admin=bool(set(roles).intersection({"founder_owner","admin_operations"}))
+ if channel.created_by_user_id!=user.id and not is_admin:
+  raise HTTPException(403,"Only the channel creator or an administrator can restore this channel")
+ if channel.archived_at is None:
+  raise HTTPException(409,"Channel is not archived")
+ channel.archived_at=None
+ channel.updated_at=datetime.now(timezone.utc)
+ record(db,user.organization_id,user.id,"unarchive","communication_channel",channel.id)
+ db.commit()
+ return {"channel_id":channel.id,"archived_at":None}
 
 @router.post("/channels/{channel_id}/members",status_code=201)
 def add_member(channel_id:UUID,payload:MemberAdd,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
