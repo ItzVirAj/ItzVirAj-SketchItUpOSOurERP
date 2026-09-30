@@ -14,9 +14,11 @@ from .modules.documents.router import router as documents_router
 from .modules.notifications.router import router as notifications_router
 from .modules.communications.router import router as communications_router
 from .modules.communications.websocket import router as communications_ws_router
+from .modules.communications.pubsub import bus
 from .modules.notifications.scheduler import overdue_notification_loop
 @asynccontextmanager
 async def lifespan(app:FastAPI):
+ await bus.start(settings.redis_url)
  task=asyncio.create_task(overdue_notification_loop())
  try:
   yield
@@ -24,6 +26,7 @@ async def lifespan(app:FastAPI):
   task.cancel()
   try: await task
   except asyncio.CancelledError: pass
+  await bus.stop()
 
 app=FastAPI(title="SketchItUp Owner OS API",version="0.1.0",lifespan=lifespan)
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_list,allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
