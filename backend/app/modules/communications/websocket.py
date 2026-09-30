@@ -49,6 +49,7 @@ async def communication_websocket(websocket:WebSocket):
     channel=can_access(db,user,channel_id)
     if not channel:
      await websocket.send_json({"type":"error","detail":"Channel not found"});continue
+    manager.subscribe(websocket,channel.id)
     await websocket.send_json({"type":"subscribed","channel_id":str(channel.id)})
    elif data.get("type")=="ping":
     await websocket.send_json({"type":"pong"})
