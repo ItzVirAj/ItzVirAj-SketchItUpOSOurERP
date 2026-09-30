@@ -53,9 +53,13 @@ def accept_proposal(proposal_id:UUID,user:User=Depends(require_permission("sales
     if not proposal: raise HTTPException(404,"Proposal not found")
     if proposal.status!="sent":
         raise HTTPException(400,"Only sent proposals can be accepted")
+    existing_contract=db.scalar(select(Contract).where(Contract.organization_id==user.organization_id,Contract.proposal_id==proposal.id))
+    if existing_contract:
+        raise HTTPException(409,"A contract already exists for this proposal")
     if not proposal.client_id:
         raise HTTPException(400,"Proposal must be linked to a client before acceptance")
-    client=org_obj(db,__import__("types").SimpleNamespace(organization_id=user.organization_id),__import__("types").SimpleNamespace(),proposal.client_id)
+    from ..crm.models import Client
+    client=org_obj(db,Client,user,proposal.client_id)
     if not client: raise HTTPException(400,"Proposal client not found")
     proposal.status="accepted"
     proposal.updated_at=datetime.now(timezone.utc)
