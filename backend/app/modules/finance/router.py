@@ -7,6 +7,7 @@ from ...db import get_db
 from ..core.models import User
 from ..core.dependencies import require_permission
 from ..core.audit import record
+from ..notifications.service import create_notification
 from .models import Invoice,InvoiceMilestone,Payment
 from .expense_models import Expense
 from .expense_schemas import ExpenseCreate,ExpenseRead
