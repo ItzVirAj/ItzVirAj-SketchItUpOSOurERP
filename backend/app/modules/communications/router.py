@@ -11,6 +11,7 @@ from .models import Channel, ChannelMember, ChannelReadState, Message
 from .schemas import ChannelCreate, ChannelRead, ChannelUnreadRead, MessageCreate, MessageRead, MemberAdd
 from ..notifications.service import create_notification
 from .realtime import manager
+from .pubsub import bus
 
 router=APIRouter()
 
@@ -103,7 +104,9 @@ async def send_message(channel_id:UUID,payload:MessageCreate,user:User=Depends(r
  for recipient_id in recipients:
   create_notification(db,user.organization_id,recipient_id,"communications.message",f"New message in #{channel.name}",f"{user.display_name}: {preview}","communication_message",message.id,f"/communications/channels/{channel.id}")
  db.commit();db.refresh(message)
- await manager.broadcast(recipients,{"type":"message.created","channel_id":str(channel.id),"message":{"id":str(message.id),"sender_user_id":str(user.id),"body":message.body,"created_at":message.created_at.isoformat()}})
+ event={"type":"message.created","channel_id":str(channel.id),"message":{"id":str(message.id),"sender_user_id":str(user.id),"body":message.body,"created_at":message.created_at.isoformat()}}
+ if not await bus.publish(recipients,event):
+  await manager.broadcast(recipients,event)
  return message
 
 @router.patch("/messages/{message_id}",response_model=MessageRead)
