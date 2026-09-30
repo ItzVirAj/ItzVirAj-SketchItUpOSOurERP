@@ -8,6 +8,7 @@ from ..core.models import User
 from ..core.dependencies import require_permission
 from ..core.audit import record
 from ..projects.models import Project
+from ..notifications.service import create_notification
 from .models import Client,Contact,Lead,LeadActivity,LeadFollowUp,Pipeline,PipelineStage
 from .schemas import ClientCreate,ClientUpdate,ClientRead,ContactCreate,ContactRead,LeadCreate,LeadUpdate,LeadRead,ActivityCreate,ActivityRead,FollowUpCreate,FollowUpComplete,FollowUpRead,PipelineRead,StageRead,LeadConversionRead,LeadBulkStageUpdate
 
