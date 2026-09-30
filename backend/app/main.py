@@ -15,6 +15,7 @@ from .modules.notifications.router import router as notifications_router
 from .modules.communications.router import router as communications_router
 from .modules.communications.websocket import router as communications_ws_router
 from .modules.communications.pubsub import bus
+from .modules.marketing.router import router as marketing_router
 from .modules.notifications.scheduler import overdue_notification_loop
 @asynccontextmanager
 async def lifespan(app:FastAPI):
@@ -41,5 +42,6 @@ app.include_router(documents_router,prefix="/api/v1/documents",tags=["documents"
 app.include_router(notifications_router,prefix="/api/v1/notifications",tags=["notifications"])
 app.include_router(communications_router,prefix="/api/v1/communications",tags=["communications"])
 app.include_router(communications_ws_router,prefix="/api/v1/communications",tags=["communications"])
+app.include_router(marketing_router,prefix="/api/v1/marketing",tags=["marketing"])
 @app.get("/api/v1/health")
 def health(): return {"status":"ok","database":"configured"}
