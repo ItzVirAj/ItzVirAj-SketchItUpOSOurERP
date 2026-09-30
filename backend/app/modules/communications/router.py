@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from sqlalchemy.orm import Session
 from ...db import get_db
 from ..core.models import User
@@ -63,7 +63,7 @@ def channel_unread_counts(user:User=Depends(require_permission("communications.r
   state=db.scalar(select(ChannelReadState).where(ChannelReadState.channel_id==channel.id,ChannelReadState.user_id==user.id))
   q=select(Message).where(Message.channel_id==channel.id,Message.organization_id==user.organization_id,Message.sender_user_id!=user.id)
   if state:q=q.where(Message.created_at>state.last_read_at)
-  result.append(ChannelUnreadRead(channel_id=channel.id,unread_count=len(db.scalars(q).all())))
+  result.append(ChannelUnreadRead(channel_id=channel.id,unread_count=int(db.scalar(select(func.count()).select_from(q.subquery()))) or 0))
  return result
 
 @router.post("/channels/{channel_id}/read")
