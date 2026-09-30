@@ -1,6 +1,6 @@
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel,Field
+from pydantic import BaseModel,Field,field_validator
 
 class ProposalCreate(BaseModel):
     title:str=Field(min_length=1,max_length=240)
@@ -46,6 +46,16 @@ class ContractCreate(BaseModel):
     value:float|None=None
     currency:str="INR"
     terms:str|None=None
+
+class ContractStatusUpdate(BaseModel):
+    status:str
+
+    @field_validator("status")
+    @classmethod
+    def valid_status(cls,value):
+        allowed={"draft","sent","signed","active","completed","terminated"}
+        if value not in allowed: raise ValueError("Invalid contract status")
+        return value
 
 class ContractUpdate(BaseModel):
     title:str|None=Field(default=None,min_length=1,max_length=240)
