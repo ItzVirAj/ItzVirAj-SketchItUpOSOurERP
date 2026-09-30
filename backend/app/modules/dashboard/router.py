@@ -7,7 +7,7 @@ from ..core.models import User
 from ..core.dependencies import require_permission
 from ..projects.models import Project,Task
 from ..calendar.models import Event
-from ..crm.models import Client,Lead,LeadFollowUp
+from ..crm.models import Client,Lead,LeadFollowUp,PipelineStage
 from ..sales.models import Proposal,Contract
 from ..finance.models import Invoice,Payment
 from ..finance.expense_models import Expense
@@ -24,7 +24,7 @@ def overview(user:User=Depends(require_permission("dashboard.read")),db:Session=
  active_projects=count(Project,Project.status=="active")
  clients=count(Client,Client.status=="active")
  leads=count(Lead)
- open_leads=count(Lead,~Lead.stage_id.in_(select(__import__("app.modules.crm.models",fromlist=["PipelineStage"]).PipelineStage.id).where(__import__("app.modules.crm.models",fromlist=["PipelineStage"]).PipelineStage.is_closed_won==True))) if False else count(Lead)
+ open_leads=int(db.scalar(select(func.count()).select_from(Lead).join(PipelineStage,Lead.stage_id==PipelineStage.id).where(Lead.organization_id==org,PipelineStage.is_closed_won==False,PipelineStage.is_closed_lost==False)) or 0)
  tasks=count(Task,Task.status.not_in(["done","completed"]))
  overdue_tasks=count(Task,Task.due_date<now,Task.status.not_in(["done","completed"]))
  upcoming_events=int(db.scalar(select(func.count()).select_from(Event).where(Event.organization_id==org,Event.starts_at>=now)) or 0)
