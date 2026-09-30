@@ -8,8 +8,17 @@ from ..core.models import User
 from ..core.dependencies import require_permission
 from ..core.audit import record
 from ..crm.models import Lead,PipelineStage
+from ..finance.models import Payment,Invoice
+from ..sales.models import Contract
 from .models import MarketingChannel,Campaign,CampaignChannel,ContentItem,Gig,Bid,MarketingMetric,BrandAsset
 from .schemas import *
+
+CONTENT_TRANSITIONS={"idea":{"draft"},"draft":{"design","review"},"design":{"review"},"review":{"approved","draft"},"approved":{"scheduled","draft"},"scheduled":{"published","approved"},"published":{"repurposed"},"repurposed":set()}
+
+def update_fields(obj,payload):
+ for key,value in payload.model_dump(exclude_unset=True).items(): setattr(obj,key,value)
+ obj.updated_at=datetime.now(timezone.utc)
+
 
 router=APIRouter()
 
@@ -21,6 +30,51 @@ def require_org(db,user,model,object_id):
  obj=db.scalar(select(model).where(model.id==object_id,model.organization_id==user.organization_id))
  if not obj: raise HTTPException(400,"Referenced record not found in your organization")
  return obj
+
+@router.patch("/channels/{channel_id}",response_model=ChannelRead)
+def update_channel(channel_id:UUID,payload:ChannelUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ obj=require_org(db,user,MarketingChannel,channel_id);data=payload.model_dump(exclude_unset=True)
+ if "owner_user_id" in data and not org_user(db,user,data["owner_user_id"]): raise HTTPException(400,"Owner must be an active organization user")
+ if "name" in data and data["name"]!=obj.name and db.scalar(select(MarketingChannel).where(MarketingChannel.organization_id==user.organization_id,MarketingChannel.name==data["name"],MarketingChannel.id!=obj.id)): raise HTTPException(409,"Channel already exists")
+ if "status" in data and data["status"] not in {"active","paused","archived"}: raise HTTPException(400,"Invalid channel status")
+ update_fields(obj,payload);record(db,user.organization_id,user.id,"update","marketing_channel",obj.id,data);db.commit();db.refresh(obj);return obj
+
+@router.patch("/campaigns/{campaign_id}",response_model=CampaignRead)
+def update_campaign(campaign_id:UUID,payload:CampaignUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ obj=require_org(db,user,Campaign,campaign_id);data=payload.model_dump(exclude_unset=True);starts=data.get("starts_at",obj.starts_at);ends=data.get("ends_at",obj.ends_at)
+ if starts and ends and ends<=starts: raise HTTPException(400,"ends_at must be after starts_at")
+ if "owner_user_id" in data and not org_user(db,user,data["owner_user_id"]): raise HTTPException(400,"Owner must be an active organization user")
+ update_fields(obj,payload);record(db,user.organization_id,user.id,"update","marketing_campaign",obj.id,data);db.commit();db.refresh(obj);return obj
+
+@router.patch("/content/{content_id}",response_model=ContentRead)
+def update_content(content_id:UUID,payload:ContentUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ obj=require_org(db,user,ContentItem,content_id);data=payload.model_dump(exclude_unset=True)
+ if "campaign_id" in data and data["campaign_id"]: require_org(db,user,Campaign,data["campaign_id"])
+ if "channel_id" in data and data["channel_id"]: require_org(db,user,MarketingChannel,data["channel_id"])
+ if "approval_status" in data:
+  new=data["approval_status"]
+  if new not in CONTENT_TRANSITIONS: raise HTTPException(400,"Invalid content workflow status")
+  if new!=obj.approval_status and new not in CONTENT_TRANSITIONS[obj.approval_status]: raise HTTPException(409,f"Invalid content transition: {obj.approval_status} -> {new}")
+  if new in {"scheduled","published"} and not data.get("publish_at",obj.publish_at): raise HTTPException(400,"publish_at is required when scheduling or publishing content")
+ update_fields(obj,payload);record(db,user.organization_id,user.id,"update","marketing_content",obj.id,data);db.commit();db.refresh(obj);return obj
+
+@router.patch("/gigs/{gig_id}",response_model=GigRead)
+def update_gig(gig_id:UUID,payload:GigUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ obj=require_org(db,user,Gig,gig_id);update_fields(obj,payload);record(db,user.organization_id,user.id,"update","marketing_gig",obj.id,payload.model_dump(exclude_unset=True));db.commit();db.refresh(obj);return obj
+
+@router.patch("/bids/{bid_id}",response_model=BidRead)
+def update_bid(bid_id:UUID,payload:BidUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ obj=require_org(db,user,Bid,bid_id);data=payload.model_dump(exclude_unset=True)
+ if "gig_id" in data and data["gig_id"]: require_org(db,user,Gig,data["gig_id"])
+ if "status" in data and data["status"] not in {"sent","viewed","interview","hired","declined"}: raise HTTPException(400,"Invalid bid status")
+ update_fields(obj,payload);record(db,user.organization_id,user.id,"update","marketing_bid",obj.id,data);db.commit();db.refresh(obj);return obj
+
+@router.patch("/metrics/{metric_id}",response_model=MetricRead)
+def update_metric(metric_id:UUID,payload:MetricUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ obj=require_org(db,user,MarketingMetric,metric_id);data=payload.model_dump(exclude_unset=True)
+ if "channel_id" in data and data["channel_id"]: require_org(db,user,MarketingChannel,data["channel_id"])
+ if "campaign_id" in data and data["campaign_id"]: require_org(db,user,Campaign,data["campaign_id"])
+ update_fields(obj,payload);record(db,user.organization_id,user.id,"update","marketing_metric",obj.id,data);db.commit();db.refresh(obj);return obj
 
 @router.get("/channels",response_model=list[ChannelRead])
 def list_channels(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
