@@ -147,6 +147,30 @@ def kpi_period(db,user,start,end):
  due=db.scalar(select(func.count(Outreach.id)).where(Outreach.organization_id==user.organization_id,Outreach.next_follow_up_at<=now,Outreach.status.not_in(["converted","closed"]))) or 0
  overdue=db.scalar(select(func.count(Outreach.id)).where(Outreach.organization_id==user.organization_id,Outreach.next_follow_up_at<now,Outreach.status.not_in(["converted","closed"]))) or 0
  return MarketingKPIRead(period_start=start,period_end=end,impressions=int(metrics[0] or 0),website_visits=int(metrics[1] or 0),leads=int(lead_count or metrics[2] or 0),won_leads=int(won_count),estimated_won_value=float(estimated),collected_revenue=float(collected),content_published=int(published),active_campaigns=int(active),gigs=int(gigs),bids=int(bids),interviews=int(interviews),hires=int(hires),outreach_total=int(out_total),outreach_due=int(due),outreach_overdue=int(overdue))
+
+@router.get("/kpi",response_model=MarketingKPIDashboardRead)
+def marketing_kpi(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
+ end=date.today()+timedelta(days=1);start=end-timedelta(days=30);previous_start=start-timedelta(days=30)
+ return MarketingKPIDashboardRead(current=kpi_period(db,user,start,end),previous=kpi_period(db,user,previous_start,start))
+
+@router.get("/outreach",response_model=list[OutreachRead])
+def list_outreach(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
+ return db.scalars(select(Outreach).where(Outreach.organization_id==user.organization_id).order_by(Outreach.next_follow_up_at.asc().nullslast(),Outreach.created_at.desc())).all()
+
+@router.post("/outreach",response_model=OutreachRead,status_code=201)
+def create_outreach(payload:OutreachCreate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ data=payload.model_dump()
+ validate_outreach_refs(db,user,data)
+ if data.get("next_follow_up_at") and data["status"] in {"converted","closed"}: raise HTTPException(400,"Closed outreach cannot have a follow-up date")
+ obj=Outreach(organization_id=user.organization_id,**data);db.add(obj);db.flush();record(db,user.organization_id,user.id,"create","marketing_outreach",obj.id,{"contact_name":obj.contact_name});db.commit();db.refresh(obj);return obj
+
+@router.patch("/outreach/{outreach_id}",response_model=OutreachRead)
+def update_outreach(outreach_id:UUID,payload:OutreachUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ obj=require_org(db,user,Outreach,outreach_id);data=payload.model_dump(exclude_unset=True);validate_outreach_refs(db,user,data)
+ status=data.get("status",obj.status);next_follow=data.get("next_follow_up_at",obj.next_follow_up_at)
+ if status in {"converted","closed"} and next_follow is not None: raise HTTPException(400,"Closed outreach cannot have a follow-up date")
+ update_fields(obj,payload);record(db,user.organization_id,user.id,"update","marketing_outreach",obj.id,data);db.commit();db.refresh(obj);return obj
+
 @router.patch("/channels/{channel_id}",response_model=ChannelRead)
 def update_channel(channel_id:UUID,payload:ChannelUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
  obj=require_org(db,user,MarketingChannel,channel_id);data=payload.model_dump(exclude_unset=True)
