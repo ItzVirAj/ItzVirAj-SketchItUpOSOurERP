@@ -61,7 +61,7 @@ def import_row(db,user,kind,row):
   if not marketplace or not title: raise ValueError("marketplace and title are required")
   obj=db.scalar(select(Gig).where(Gig.organization_id==user.organization_id,Gig.marketplace==marketplace,Gig.title==title))
   values={"marketplace":marketplace,"title":title,"category":row.get("category") or None,"keywords":row.get("keywords") or None,"impressions":csv_int(row,"impressions",0),"clicks":csv_int(row,"clicks",0),"inquiries":csv_int(row,"inquiries",0),"orders":csv_int(row,"orders",0),"reviews":csv_int(row,"reviews",0),"last_optimised_at":csv_datetime(row,"last_optimised_at")}
-  if obj: update_fields(obj,type("Payload",(),{"model_dump":lambda self,exclude_unset=True:values})()); return obj,"updated"
+  if obj:\n   for key,value in values.items(): setattr(obj,key,value)\n   obj.updated_at=datetime.now(timezone.utc)\n   return obj,"updated"
   obj=Gig(organization_id=user.organization_id,**values);db.add(obj);db.flush();return obj,"created"
  if kind=="bids":
   marketplace=(row.get("marketplace") or "Upwork").strip();job_url=(row.get("job_url") or "").strip() or None
@@ -71,7 +71,7 @@ def import_row(db,user,kind,row):
   if gig_id: require_org(db,user,Gig,gig_id)
   values={"gig_id":gig_id,"marketplace":marketplace,"job_url":job_url,"job_title":row.get("job_title") or None,"bid_amount":csv_float(row,"bid_amount"),"connects_used":csv_int(row,"connects_used"),"status":row.get("status") or "sent","outcome":row.get("outcome") or None,"learning_notes":row.get("learning_notes") or None}
   if values["status"] not in {"sent","viewed","interview","hired","declined"}: raise ValueError("invalid bid status")
-  if obj: update_fields(obj,type("Payload",(),{"model_dump":lambda self,exclude_unset=True:values})()); return obj,"updated"
+  if obj:\n   for key,value in values.items(): setattr(obj,key,value)\n   obj.updated_at=datetime.now(timezone.utc)\n   return obj,"updated"
   obj=Bid(organization_id=user.organization_id,**values);db.add(obj);db.flush();return obj,"created"
  if kind=="metrics":
   period=csv_date(row,"period_start")
@@ -81,7 +81,7 @@ def import_row(db,user,kind,row):
   if campaign_id: require_org(db,user,Campaign,campaign_id)
   obj=db.scalar(select(MarketingMetric).where(MarketingMetric.organization_id==user.organization_id,MarketingMetric.period_start==period,MarketingMetric.channel_id==channel_id,MarketingMetric.campaign_id==campaign_id))
   values={"channel_id":channel_id,"campaign_id":campaign_id,"period_start":period,"followers":csv_int(row,"followers"),"impressions":csv_int(row,"impressions"),"engagement_rate":csv_float(row,"engagement_rate"),"website_visits":csv_int(row,"website_visits"),"leads":csv_int(row,"leads"),"cost_per_lead":csv_float(row,"cost_per_lead"),"conversion_rate":csv_float(row,"conversion_rate"),"revenue":csv_float(row,"revenue")}
-  if obj: update_fields(obj,type("Payload",(),{"model_dump":lambda self,exclude_unset=True:values})()); return obj,"updated"
+  if obj:\n   for key,value in values.items(): setattr(obj,key,value)\n   obj.updated_at=datetime.now(timezone.utc)\n   return obj,"updated"
   obj=MarketingMetric(organization_id=user.organization_id,**values);db.add(obj);db.flush();return obj,"created"
  raise ValueError("Unsupported import type")
 
@@ -103,9 +103,11 @@ def import_csv(import_type:str,file:UploadFile=File(...),user:User=Depends(requi
  results=[];created=updated=failed=0
  for number,row in enumerate(rows,2):
   try:
-   obj,action=import_row(db,user,import_type,row);db.flush();record(db,user.organization_id,user.id,"import","marketing_"+import_type,obj.id,{"source":"csv","row":number,"filename":file.filename});results.append(ImportRowResult(row=number,status=action,record_id=obj.id));created+=action=="created";updated+=action=="updated"
+   with db.begin_nested():
+    obj,action=import_row(db,user,import_type,row);db.flush();record(db,user.organization_id,user.id,"import","marketing_"+import_type,obj.id,{"source":"csv","row":number,"filename":file.filename})
+   results.append(ImportRowResult(row=number,status=action,record_id=obj.id));created+=action=="created";updated+=action=="updated"
   except Exception as exc:
-   db.rollback();failed+=1;results.append(ImportRowResult(row=number,status="failed",error=str(exc)[:300]))
+   failed+=1;results.append(ImportRowResult(row=number,status="failed",error=str(exc)[:300]))
  db.commit()
  return ImportResult(import_type=import_type,total_rows=len(rows),created=created,updated=updated,failed=failed,rows=results)
 
