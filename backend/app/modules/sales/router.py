@@ -36,6 +36,47 @@ def create_proposal(payload:ProposalCreate,user:User=Depends(require_permission(
     proposal=Proposal(organization_id=user.organization_id,created_by_user_id=user.id,**payload.model_dump())
     db.add(proposal);db.flush();record(db,user.organization_id,user.id,"create","proposal",proposal.id,{"title":proposal.title});db.commit();db.refresh(proposal);return proposal
 
+@router.post("/proposals/{proposal_id}/send",response_model=ProposalRead)
+def send_proposal(proposal_id:UUID,user:User=Depends(require_permission("sales.create")),db:Session=Depends(get_db)):
+    proposal=org_obj(db,Proposal,user,proposal_id)
+    if not proposal: raise HTTPException(404,"Proposal not found")
+    if proposal.status not in {"draft","revised"}:
+        raise HTTPException(400,"Only draft or revised proposals can be sent")
+    proposal.status="sent"
+    proposal.updated_at=datetime.now(timezone.utc)
+    record(db,user.organization_id,user.id,"status_change","proposal",proposal.id,{"from":"draft_or_revised","to":"sent"})
+    db.commit();db.refresh(proposal);return proposal
+
+@router.post("/proposals/{proposal_id}/accept",response_model=ContractRead,status_code=201)
+def accept_proposal(proposal_id:UUID,user:User=Depends(require_permission("sales.create")),db:Session=Depends(get_db)):
+    proposal=org_obj(db,Proposal,user,proposal_id)
+    if not proposal: raise HTTPException(404,"Proposal not found")
+    if proposal.status!="sent":
+        raise HTTPException(400,"Only sent proposals can be accepted")
+    if not proposal.client_id:
+        raise HTTPException(400,"Proposal must be linked to a client before acceptance")
+    client=org_obj(db,__import__("types").SimpleNamespace(organization_id=user.organization_id),__import__("types").SimpleNamespace(),proposal.client_id)
+    if not client: raise HTTPException(400,"Proposal client not found")
+    proposal.status="accepted"
+    proposal.updated_at=datetime.now(timezone.utc)
+    contract=Contract(
+        organization_id=user.organization_id,
+        proposal_id=proposal.id,
+        lead_id=proposal.lead_id,
+        client_id=proposal.client_id,
+        project_id=proposal.project_id,
+        title=proposal.title,
+        status="draft",
+        value=proposal.amount,
+        currency=proposal.currency,
+        terms=proposal.terms,
+        created_by_user_id=user.id,
+    )
+    db.add(contract);db.flush()
+    record(db,user.organization_id,user.id,"status_change","proposal",proposal.id,{"from":"sent","to":"accepted","contract_id":str(contract.id)})
+    record(db,user.organization_id,user.id,"create","contract",contract.id,{"proposal_id":str(proposal.id)})
+    db.commit();db.refresh(contract);return contract
+
 @router.patch("/proposals/{proposal_id}",response_model=ProposalRead)
 def update_proposal(proposal_id:UUID,payload:ProposalUpdate,user:User=Depends(require_permission("sales.create")),db:Session=Depends(get_db)):
     proposal=org_obj(db,Proposal,user,proposal_id)
