@@ -7,8 +7,8 @@ from ...db import get_db
 from ..core.models import User
 from ..core.dependencies import require_permission
 from ..core.audit import record
-from .models import Channel, ChannelMember, Message
-from .schemas import ChannelCreate, ChannelRead, MessageCreate, MessageRead, MemberAdd
+from .models import Channel, ChannelMember, ChannelReadState, Message
+from .schemas import ChannelCreate, ChannelRead, ChannelUnreadRead, MessageCreate, MessageRead, MemberAdd
 from ..notifications.service import create_notification
 from .realtime import manager
 
@@ -50,6 +50,32 @@ def add_member(channel_id:UUID,payload:MemberAdd,user:User=Depends(require_permi
  record(db,user.organization_id,user.id,"add_member","communication_channel",channel.id,{"user_id":str(payload.user_id)})
  create_notification(db,user.organization_id,payload.user_id,"communications.channel_member_added","Added to private channel",f"You were added to #{channel.name}.","communication_channel",channel.id,f"/communications/channels/{channel.id}")
  db.commit();return {"channel_id":channel.id,"user_id":payload.user_id}
+
+
+
+@router.get("/channels/unread",response_model=list[ChannelUnreadRead])
+def channel_unread_counts(user:User=Depends(require_permission("communications.read")),db:Session=Depends(get_db)):
+ channels=db.scalars(select(Channel).where(Channel.organization_id==user.organization_id)).all()
+ result=[]
+ for channel in channels:
+  if channel.channel_type!="public" and not can_access(db,user,channel):
+   continue
+  state=db.scalar(select(ChannelReadState).where(ChannelReadState.channel_id==channel.id,ChannelReadState.user_id==user.id))
+  q=select(Message).where(Message.channel_id==channel.id,Message.organization_id==user.organization_id,Message.sender_user_id!=user.id)
+  if state:q=q.where(Message.created_at>state.last_read_at)
+  result.append(ChannelUnreadRead(channel_id=channel.id,unread_count=len(db.scalars(q).all())))
+ return result
+
+@router.post("/channels/{channel_id}/read")
+def mark_channel_read(channel_id:UUID,user:User=Depends(require_permission("communications.read")),db:Session=Depends(get_db)):
+ channel=get_channel(db,user,channel_id)
+ if not channel or not can_access(db,user,channel): raise HTTPException(404,"Channel not found")
+ now=datetime.now(timezone.utc)
+ state=db.scalar(select(ChannelReadState).where(ChannelReadState.channel_id==channel.id,ChannelReadState.user_id==user.id))
+ if state: state.last_read_at=now
+ else: db.add(ChannelReadState(channel_id=channel.id,user_id=user.id,last_read_at=now))
+ db.commit()
+ return {"channel_id":channel.id,"last_read_at":now}
 
 @router.get("/channels/{channel_id}/messages",response_model=list[MessageRead])
 def list_messages(channel_id:UUID,user:User=Depends(require_permission("communications.read")),db:Session=Depends(get_db),limit:int=50,before:datetime|None=None):
