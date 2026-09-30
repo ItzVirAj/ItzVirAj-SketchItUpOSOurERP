@@ -49,6 +49,7 @@ class LeadCreate(BaseModel):
     email:str|None=None
     source:str=Field(min_length=1,max_length=80)
     campaign:str|None=None
+    campaign_id:UUID|None=None
     estimated_value:float|None=None
     expected_close_date:datetime|None=None
     requirement_summary:str|None=None
@@ -71,6 +72,7 @@ class LeadUpdate(BaseModel):
     email:str|None=None
     source:str|None=None
     campaign:str|None=None
+    campaign_id:UUID|None=None
     estimated_value:float|None=None
     expected_close_date:datetime|None=None
     requirement_summary:str|None=None
