@@ -108,6 +108,9 @@ class FollowUpCreate(BaseModel):
     action:str=Field(min_length=1,max_length=240)
     notes:str|None=None
 
+class FollowUpComplete(BaseModel):
+    notes:str|None=None
+
 class FollowUpRead(FollowUpCreate):
     id:UUID
     organization_id:UUID
