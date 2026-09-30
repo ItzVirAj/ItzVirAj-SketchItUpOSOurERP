@@ -45,6 +45,24 @@ def finance_aging(user:User=Depends(require_permission("dashboard.read")),db:Ses
   result[bucket]+=balance
  return result
 
+
+@router.get("/attention")
+def attention(user:User=Depends(require_permission("dashboard.read")),db:Session=Depends(get_db),limit:int=10):
+ now=datetime.now(timezone.utc);limit=max(1,min(limit,25));items=[]
+ for t in db.scalars(select(Task).where(Task.organization_id==user.organization_id,Task.due_date<now,Task.status.not_in(["done","completed"])).order_by(Task.due_date).limit(limit)).all(): items.append({"type":"overdue_task","priority":"high","title":t.title,"due_at":t.due_date,"entity_id":t.id})
+ for f in db.scalars(select(LeadFollowUp).where(LeadFollowUp.organization_id==user.organization_id,LeadFollowUp.due_at<now,LeadFollowUp.completed_at.is_(None)).order_by(LeadFollowUp.due_at).limit(limit)).all(): items.append({"type":"overdue_follow_up","priority":"high","title":f.action,"due_at":f.due_at,"entity_id":f.lead_id})
+ for i in db.scalars(select(Invoice).where(Invoice.organization_id==user.organization_id,Invoice.due_at<now,Invoice.status.in_([ "sent","partially_paid","overdue"])).order_by(Invoice.due_at).limit(limit)).all(): items.append({"type":"overdue_invoice","priority":"high","title":i.invoice_number,"due_at":i.due_at,"entity_id":i.id})
+ items.sort(key=lambda x:x["due_at"] or now);return items[:limit]
+
+@router.get("/upcoming")
+def upcoming(user:User=Depends(require_permission("dashboard.read")),db:Session=Depends(get_db),days:int=14,limit:int=20):
+ now=datetime.now(timezone.utc);days=max(1,min(days,90));limit=max(1,min(limit,50));end=now.replace(hour=0,minute=0,second=0,microsecond=0)
+ from datetime import timedelta
+ end=end+timedelta(days=days+1);items=[]
+ for e in db.scalars(select(Event).where(Event.organization_id==user.organization_id,Event.starts_at>=now,Event.starts_at<end).order_by(Event.starts_at).limit(limit)).all(): items.append({"type":"event","title":e.title,"starts_at":e.starts_at,"ends_at":e.ends_at,"entity_id":e.id})
+ for p in db.scalars(select(Proposal).where(Proposal.organization_id==user.organization_id,Proposal.valid_until>=now,Proposal.valid_until<end,Proposal.status=="sent").order_by(Proposal.valid_until).limit(limit)).all(): items.append({"type":"proposal_expiry","title":p.title,"starts_at":p.valid_until,"entity_id":p.id})
+ items.sort(key=lambda x:x["starts_at"]);return items[:limit]
+
 @router.get("/overview")
 def overview(user:User=Depends(require_permission("dashboard.read")),db:Session=Depends(get_db)):
  org=user.organization_id
