@@ -75,7 +75,7 @@ def unarchive_channel(channel_id:UUID,user:User=Depends(require_permission("comm
 @router.post("/channels/{channel_id}/members",status_code=201)
 def add_member(channel_id:UUID,payload:MemberAdd,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
  channel=get_channel(db,user,channel_id)
- if not channel: raise HTTPException(404,"Channel not found")
+ if not channel or channel.archived_at is not None: raise HTTPException(404,"Channel not found")
  member_user=db.scalar(select(User).where(User.id==payload.user_id,User.organization_id==user.organization_id,User.status=="active"))
  if not member_user: raise HTTPException(400,"User must belong to your organization and be active")
  if db.scalar(select(ChannelMember).where(ChannelMember.channel_id==channel.id,ChannelMember.user_id==payload.user_id)):
@@ -91,7 +91,7 @@ def add_member(channel_id:UUID,payload:MemberAdd,user:User=Depends(require_permi
 @router.delete("/channels/{channel_id}/members/{member_user_id}")
 def remove_member(channel_id:UUID,member_user_id:UUID,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
  channel=get_channel(db,user,channel_id)
- if not channel: raise HTTPException(404,"Channel not found")
+ if not channel or channel.archived_at is not None: raise HTTPException(404,"Channel not found")
  target=db.scalar(select(ChannelMember).where(ChannelMember.channel_id==channel.id,ChannelMember.user_id==member_user_id))
  if not target: raise HTTPException(404,"Channel member not found")
  roles=db.scalars(
