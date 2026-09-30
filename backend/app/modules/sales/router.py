@@ -7,6 +7,7 @@ from ...db import get_db
 from ..core.models import User
 from ..core.dependencies import require_permission
 from ..core.audit import record
+from ..notifications.service import create_notification
 from .models import Proposal,Contract
 from .schemas import ProposalCreate,ProposalUpdate,ProposalRead,ContractCreate,ContractUpdate,ContractRead,ContractStatusUpdate
 
