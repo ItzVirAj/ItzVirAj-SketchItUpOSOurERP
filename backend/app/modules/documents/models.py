@@ -1,12 +1,12 @@
 from datetime import datetime,timezone
-from uuid import uuid4
+from uuid import UUID
 from sqlalchemy import String,Text,Integer,BigInteger,ForeignKey,DateTime,UniqueConstraint
 from sqlalchemy.orm import Mapped,mapped_column
 from ..core.base import BaseModel
 class DocumentFolder(BaseModel):
  __tablename__="document_folders"
- id:Mapped[object]=mapped_column(primary_key=True,default=uuid4); organization_id:Mapped[object]=mapped_column(ForeignKey("organizations.id",ondelete="CASCADE"),index=True)
- parent_folder_id:Mapped[object|None]=mapped_column(ForeignKey("document_folders.id",ondelete="CASCADE"),nullable=True,index=True); name:Mapped[str]=mapped_column(String(240)); description:Mapped[str|None]=mapped_column(Text)
+ id:Mapped[UUID]=mapped_column(primary_key=True,default=uuid4); organization_id:Mapped[object]=mapped_column(ForeignKey("organizations.id",ondelete="CASCADE"),index=True)
+ parent_folder_id:Mapped[UUID|None]=mapped_column(ForeignKey("document_folders.id",ondelete="CASCADE"),nullable=True,index=True); name:Mapped[str]=mapped_column(String(240)); description:Mapped[str|None]=mapped_column(Text)
  created_by_user_id:Mapped[object]=mapped_column(ForeignKey("users.id")); created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc)); updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
 class Document(BaseModel):
  __tablename__="documents"
