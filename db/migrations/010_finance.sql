@@ -1,0 +1,14 @@
+CREATE TABLE invoices(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),organization_id uuid NOT NULL REFERENCES organizations(id),client_id uuid NOT NULL REFERENCES clients(id),project_id uuid REFERENCES projects(id) ON DELETE SET NULL,contract_id uuid REFERENCES contracts(id) ON DELETE SET NULL,invoice_number varchar(80) NOT NULL UNIQUE,status varchar(30) NOT NULL DEFAULT 'draft',currency varchar(3) NOT NULL DEFAULT 'INR',subtotal numeric(14,2) NOT NULL DEFAULT 0,tax_amount numeric(14,2) NOT NULL DEFAULT 0,total_amount numeric(14,2) NOT NULL DEFAULT 0,due_at timestamptz,notes text,created_by_user_id uuid NOT NULL REFERENCES users(id),created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE invoice_milestones(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),organization_id uuid NOT NULL REFERENCES organizations(id),invoice_id uuid NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,name varchar(160) NOT NULL,percentage numeric(5,2),amount numeric(14,2) NOT NULL,due_at timestamptz,status varchar(30) NOT NULL DEFAULT 'pending',created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE payments(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),organization_id uuid NOT NULL REFERENCES organizations(id),invoice_id uuid NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,amount numeric(14,2) NOT NULL,currency varchar(3) NOT NULL DEFAULT 'INR',payment_method varchar(40) NOT NULL,reference varchar(120),paid_at timestamptz NOT NULL,notes text,created_by_user_id uuid NOT NULL REFERENCES users(id),created_at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX idx_invoices_org_created ON invoices(organization_id,created_at DESC);
+CREATE INDEX idx_invoices_client_status ON invoices(client_id,status);
+CREATE INDEX idx_invoices_contract ON invoices(contract_id);
+CREATE INDEX idx_invoice_milestones_invoice_due ON invoice_milestones(invoice_id,due_at);
+CREATE INDEX idx_payments_invoice_paid ON payments(invoice_id,paid_at DESC);
+CREATE INDEX idx_payments_org_paid ON payments(organization_id,paid_at DESC);
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_milestones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+INSERT INTO permissions(key,description) VALUES ('finance.read','View invoices, milestones, and payments'),('finance.create','Create invoices, milestones, and payments') ON CONFLICT (key) DO NOTHING;
+INSERT INTO role_permissions(role_id,permission_id) SELECT r.id,p.id FROM roles r CROSS JOIN permissions p WHERE r.name='founder_owner' AND p.key IN ('finance.read','finance.create') ON CONFLICT DO NOTHING;
