@@ -69,6 +69,7 @@ class Lead(BaseModel):
     email:Mapped[str|None]=mapped_column(String(320))
     source:Mapped[str]=mapped_column(String(80))
     campaign:Mapped[str|None]=mapped_column(String(160))
+    campaign_id:Mapped[UUID|None]=mapped_column(ForeignKey("marketing_campaigns.id",ondelete="SET NULL"))
     estimated_value:Mapped[float|None]=mapped_column(Numeric(14,2))
     expected_close_date:Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
     requirement_summary:Mapped[str|None]=mapped_column(Text)
