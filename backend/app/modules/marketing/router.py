@@ -1,6 +1,7 @@
-from datetime import datetime,timezone
+from datetime import datetime,timezone,date
+import csv,io
 from uuid import UUID
-from fastapi import APIRouter,Depends,HTTPException
+from fastapi import APIRouter,Depends,HTTPException,UploadFile,File
 from sqlalchemy import func,select
 from sqlalchemy.orm import Session
 from ...db import get_db
@@ -30,6 +31,83 @@ def require_org(db,user,model,object_id):
  obj=db.scalar(select(model).where(model.id==object_id,model.organization_id==user.organization_id))
  if not obj: raise HTTPException(400,"Referenced record not found in your organization")
  return obj
+
+
+CSV_IMPORT_TYPES={"gigs","bids","metrics"}
+
+def csv_int(row,key,default=None):
+ value=row.get(key)
+ if value in (None,""): return default
+ return int(value)
+
+def csv_float(row,key,default=None):
+ value=row.get(key)
+ if value in (None,""): return default
+ return float(value)
+
+def csv_date(row,key):
+ value=row.get(key)
+ if not value:return None
+ return date.fromisoformat(value)
+
+def csv_datetime(row,key):
+ value=row.get(key)
+ if not value:return None
+ return datetime.fromisoformat(value.replace("Z","+00:00"))
+
+def import_row(db,user,kind,row):
+ if kind=="gigs":
+  marketplace=(row.get("marketplace") or "").strip();title=(row.get("title") or "").strip()
+  if not marketplace or not title: raise ValueError("marketplace and title are required")
+  obj=db.scalar(select(Gig).where(Gig.organization_id==user.organization_id,Gig.marketplace==marketplace,Gig.title==title))
+  values={"marketplace":marketplace,"title":title,"category":row.get("category") or None,"keywords":row.get("keywords") or None,"impressions":csv_int(row,"impressions",0),"clicks":csv_int(row,"clicks",0),"inquiries":csv_int(row,"inquiries",0),"orders":csv_int(row,"orders",0),"reviews":csv_int(row,"reviews",0),"last_optimised_at":csv_datetime(row,"last_optimised_at")}
+  if obj: update_fields(obj,type("Payload",(),{"model_dump":lambda self,exclude_unset=True:values})()); return obj,"updated"
+  obj=Gig(organization_id=user.organization_id,**values);db.add(obj);db.flush();return obj,"created"
+ if kind=="bids":
+  marketplace=(row.get("marketplace") or "Upwork").strip();job_url=(row.get("job_url") or "").strip() or None
+  if not job_url: raise ValueError("job_url is required for bid imports")
+  obj=db.scalar(select(Bid).where(Bid.organization_id==user.organization_id,Bid.job_url==job_url))
+  gig_id=UUID(row["gig_id"]) if row.get("gig_id") else None
+  if gig_id: require_org(db,user,Gig,gig_id)
+  values={"gig_id":gig_id,"marketplace":marketplace,"job_url":job_url,"job_title":row.get("job_title") or None,"bid_amount":csv_float(row,"bid_amount"),"connects_used":csv_int(row,"connects_used"),"status":row.get("status") or "sent","outcome":row.get("outcome") or None,"learning_notes":row.get("learning_notes") or None}
+  if values["status"] not in {"sent","viewed","interview","hired","declined"}: raise ValueError("invalid bid status")
+  if obj: update_fields(obj,type("Payload",(),{"model_dump":lambda self,exclude_unset=True:values})()); return obj,"updated"
+  obj=Bid(organization_id=user.organization_id,**values);db.add(obj);db.flush();return obj,"created"
+ if kind=="metrics":
+  period=csv_date(row,"period_start")
+  if not period: raise ValueError("period_start is required")
+  channel_id=UUID(row["channel_id"]) if row.get("channel_id") else None;campaign_id=UUID(row["campaign_id"]) if row.get("campaign_id") else None
+  if channel_id: require_org(db,user,MarketingChannel,channel_id)
+  if campaign_id: require_org(db,user,Campaign,campaign_id)
+  obj=db.scalar(select(MarketingMetric).where(MarketingMetric.organization_id==user.organization_id,MarketingMetric.period_start==period,MarketingMetric.channel_id==channel_id,MarketingMetric.campaign_id==campaign_id))
+  values={"channel_id":channel_id,"campaign_id":campaign_id,"period_start":period,"followers":csv_int(row,"followers"),"impressions":csv_int(row,"impressions"),"engagement_rate":csv_float(row,"engagement_rate"),"website_visits":csv_int(row,"website_visits"),"leads":csv_int(row,"leads"),"cost_per_lead":csv_float(row,"cost_per_lead"),"conversion_rate":csv_float(row,"conversion_rate"),"revenue":csv_float(row,"revenue")}
+  if obj: update_fields(obj,type("Payload",(),{"model_dump":lambda self,exclude_unset=True:values})()); return obj,"updated"
+  obj=MarketingMetric(organization_id=user.organization_id,**values);db.add(obj);db.flush();return obj,"created"
+ raise ValueError("Unsupported import type")
+
+@router.post("/imports/csv",response_model=ImportResult)
+def import_csv(import_type:str,file:UploadFile=File(...),user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ if import_type not in CSV_IMPORT_TYPES: raise HTTPException(400,"import_type must be gigs, bids, or metrics")
+ if not file.filename or not file.filename.lower().endswith(".csv"): raise HTTPException(400,"Only CSV files are supported")
+ raw=file.file.read()
+ if len(raw)>5*1024*1024: raise HTTPException(413,"CSV file exceeds 5 MB limit")
+ try: text=raw.decode("utf-8-sig")
+ except UnicodeDecodeError: raise HTTPException(400,"CSV must be UTF-8 encoded")
+ reader=csv.DictReader(io.StringIO(text))
+ if not reader.fieldnames: raise HTTPException(400,"CSV header is required")
+ required={"gigs":{"marketplace","title"},"bids":{"job_url"},"metrics":{"period_start"}}[import_type]
+ missing=required-set(reader.fieldnames)
+ if missing: raise HTTPException(400,"Missing required columns: "+", ".join(sorted(missing)))
+ rows=list(reader)
+ if len(rows)>5000: raise HTTPException(413,"CSV cannot contain more than 5000 data rows")
+ results=[];created=updated=failed=0
+ for number,row in enumerate(rows,2):
+  try:
+   obj,action=import_row(db,user,import_type,row);db.flush();record(db,user.organization_id,user.id,"import","marketing_"+import_type,obj.id,{"source":"csv","row":number,"filename":file.filename});results.append(ImportRowResult(row=number,status=action,record_id=obj.id));created+=action=="created";updated+=action=="updated"
+  except Exception as exc:
+   db.rollback();failed+=1;results.append(ImportRowResult(row=number,status="failed",error=str(exc)[:300]))
+ db.commit()
+ return ImportResult(import_type=import_type,total_rows=len(rows),created=created,updated=updated,failed=failed,rows=results)
 
 @router.patch("/channels/{channel_id}",response_model=ChannelRead)
 def update_channel(channel_id:UUID,payload:ChannelUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
