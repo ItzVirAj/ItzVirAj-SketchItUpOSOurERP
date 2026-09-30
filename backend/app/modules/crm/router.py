@@ -73,6 +73,10 @@ def create_lead(payload:LeadCreate,user:User=Depends(require_permission("crm.cre
     if stage.is_closed_lost and not payload.lost_reason: raise HTTPException(400,"Lost reason is required")
     if not stage.is_closed_won and not payload.next_follow_up_at: raise HTTPException(400,"Active leads require a next follow-up date")
     if payload.client_id and not org_client(db,user,payload.client_id): raise HTTPException(400,"Client must belong to your organization")
+    if payload.contact_id:
+        contact=db.scalar(select(Contact).where(Contact.id==payload.contact_id,Contact.organization_id==user.organization_id))
+        if not contact or (payload.client_id and contact.client_id!=payload.client_id): raise HTTPException(400,"Contact must belong to the selected client")
+    if payload.temperature not in {"Cold","Warm","Hot"}: raise HTTPException(400,"Temperature must be Cold, Warm, or Hot")
     lead=Lead(organization_id=user.organization_id,**payload.model_dump())
     db.add(lead);db.flush();record(db,user.organization_id,user.id,"create","lead",lead.id,{"name":lead.name});db.commit();db.refresh(lead);return lead
 
@@ -92,7 +96,14 @@ def update_lead(lead_id:UUID,payload:LeadUpdate,user:User=Depends(require_permis
     if not stage.is_closed_won and not next_follow_up: raise HTTPException(400,"Active leads require a next follow-up date")
     lost_reason=data.get("lost_reason",lead.lost_reason)
     if stage.is_closed_lost and not lost_reason: raise HTTPException(400,"Lost reason is required")
-    if data.get("client_id") and not org_client(db,user,data["client_id"]): raise HTTPException(400,"Client must belong to your organization")
+    client_id=data.get("client_id",lead.client_id)
+    if client_id and not org_client(db,user,client_id): raise HTTPException(400,"Client must belong to your organization")
+    contact_id=data.get("contact_id",lead.contact_id)
+    if contact_id:
+        contact=db.scalar(select(Contact).where(Contact.id==contact_id,Contact.organization_id==user.organization_id))
+        if not contact or (client_id and contact.client_id!=client_id): raise HTTPException(400,"Contact must belong to the selected client")
+    temperature=data.get("temperature",lead.temperature)
+    if temperature not in {"Cold","Warm","Hot"}: raise HTTPException(400,"Temperature must be Cold, Warm, or Hot")
     for key,value in data.items(): setattr(lead,key,value)
     lead.updated_at=datetime.now(timezone.utc)
     record(db,user.organization_id,user.id,"update","lead",lead.id,{"stage_id":str(stage.id)});db.commit();db.refresh(lead);return lead
