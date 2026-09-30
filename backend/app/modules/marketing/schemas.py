@@ -58,3 +58,31 @@ class ImportRowResult(BaseModel):
  row:int; status:str; record_id:UUID|None=None; error:str|None=None
 class ImportResult(BaseModel):
  import_type:str; total_rows:int; created:int; updated:int; failed:int; rows:list[ImportRowResult]
+
+
+class OutreachCreate(BaseModel):
+ lead_id:UUID|None=None; campaign_id:UUID|None=None; owner_user_id:UUID|None=None
+ contact_name:str=Field(min_length=1,max_length=200); company:str|None=None
+ contact_method:str="email"; target:str|None=None; status:str="planned"
+ last_contacted_at:datetime|None=None; next_follow_up_at:datetime|None=None; notes:str|None=None
+
+class OutreachUpdate(BaseModel):
+ lead_id:UUID|None=None; campaign_id:UUID|None=None; owner_user_id:UUID|None=None
+ contact_name:str|None=Field(default=None,min_length=1,max_length=200); company:str|None=None
+ contact_method:str|None=None; target:str|None=None; status:str|None=None
+ last_contacted_at:datetime|None=None; next_follow_up_at:datetime|None=None; notes:str|None=None
+
+class OutreachRead(OutreachCreate):
+ id:UUID; organization_id:UUID; created_at:datetime; updated_at:datetime
+
+class MarketingKPIRead(BaseModel):
+ period_start:date; period_end:date
+ impressions:int; website_visits:int; leads:int; won_leads:int
+ estimated_won_value:float; collected_revenue:float
+ content_published:int; active_campaigns:int
+ gigs:int; bids:int; interviews:int; hires:int
+ outreach_total:int; outreach_due:int; outreach_overdue:int
+
+class MarketingKPIDashboardRead(BaseModel):
+ current:MarketingKPIRead
+ previous:MarketingKPIRead
