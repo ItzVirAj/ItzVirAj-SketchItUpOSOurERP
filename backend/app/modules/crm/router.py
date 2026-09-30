@@ -1,7 +1,7 @@
 from datetime import datetime,timezone
 from uuid import UUID
-from fastapi import APIRouter,Depends,HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter,Depends,HTTPException,Query
+from sqlalchemy import select,func
 from sqlalchemy.orm import Session
 from ...db import get_db
 from ..core.models import User
@@ -9,7 +9,7 @@ from ..core.dependencies import require_permission
 from ..core.audit import record
 from ..projects.models import Project
 from .models import Client,Contact,Lead,LeadActivity,LeadFollowUp,Pipeline,PipelineStage
-from .schemas import ClientCreate,ClientUpdate,ClientRead,ContactCreate,ContactRead,LeadCreate,LeadUpdate,LeadRead,ActivityCreate,ActivityRead,FollowUpCreate,FollowUpComplete,FollowUpRead,PipelineRead,StageRead,LeadConversionRead
+from .schemas import ClientCreate,ClientUpdate,ClientRead,ContactCreate,ContactRead,LeadCreate,LeadUpdate,LeadRead,ActivityCreate,ActivityRead,FollowUpCreate,FollowUpComplete,FollowUpRead,PipelineRead,StageRead,LeadConversionRead,LeadBulkStageUpdate
 
 router=APIRouter()
 
@@ -61,8 +61,42 @@ def list_stages(pipeline_id:UUID,user:User=Depends(require_permission("crm.read"
     return db.scalars(select(PipelineStage).where(PipelineStage.pipeline_id==pipeline_id,PipelineStage.organization_id==user.organization_id).order_by(PipelineStage.position)).all()
 
 @router.get("/leads",response_model=list[LeadRead])
-def list_leads(user:User=Depends(require_permission("crm.read")),db:Session=Depends(get_db)):
-    return db.scalars(select(Lead).where(Lead.organization_id==user.organization_id).order_by(Lead.updated_at.desc())).all()
+def list_leads(
+    user:User=Depends(require_permission("crm.read")),db:Session=Depends(get_db),
+    search:str|None=Query(default=None,max_length=120),pipeline_id:UUID|None=None,stage_id:UUID|None=None,
+    owner_user_id:UUID|None=None,temperature:str|None=None,client_id:UUID|None=None,
+    limit:int=Query(default=50,ge=1,le=100),offset:int=Query(default=0,ge=0)
+):
+    q=select(Lead).where(Lead.organization_id==user.organization_id)
+    if search:
+        term=f"%{search.strip()}%";q=q.where((Lead.name.ilike(term))|(Lead.company.ilike(term))|(Lead.email.ilike(term))|(Lead.phone.ilike(term)))
+    if pipeline_id: q=q.where(Lead.pipeline_id==pipeline_id)
+    if stage_id: q=q.where(Lead.stage_id==stage_id)
+    if owner_user_id: q=q.where(Lead.owner_user_id==owner_user_id)
+    if client_id: q=q.where(Lead.client_id==client_id)
+    if temperature:
+        if temperature not in {"Cold","Warm","Hot"}: raise HTTPException(400,"Temperature must be Cold, Warm, or Hot")
+        q=q.where(Lead.temperature==temperature)
+    return db.scalars(q.order_by(Lead.updated_at.desc()).offset(offset).limit(limit)).all()
+
+@router.post("/leads/bulk-stage",response_model=dict)
+def bulk_update_stage(payload:LeadBulkStageUpdate,user:User=Depends(require_permission("crm.create")),db:Session=Depends(get_db)):
+    stage=db.scalar(select(PipelineStage).where(PipelineStage.id==payload.stage_id,PipelineStage.organization_id==user.organization_id))
+    if not stage: raise HTTPException(404,"Stage not found")
+    leads=db.scalars(select(Lead).where(Lead.id.in_(payload.lead_ids),Lead.organization_id==user.organization_id)).all()
+    if len(leads)!=len(set(payload.lead_ids)): raise HTTPException(400,"One or more leads were not found in your organization")
+    if stage.is_closed_lost:
+        missing=[str(l.id) for l in leads if not l.lost_reason]
+        if missing: raise HTTPException(400,"Lost reason is required before moving leads to a Lost stage")
+    if not stage.is_closed_won:
+        missing=[str(l.id) for l in leads if not l.next_follow_up_at]
+        if missing: raise HTTPException(400,"Active leads require a next follow-up date")
+    now=datetime.now(timezone.utc)
+    for lead in leads:
+        if lead.pipeline_id!=stage.pipeline_id: raise HTTPException(400,"All selected leads must belong to the target pipeline")
+        lead.stage_id=stage.id;lead.updated_at=now
+        record(db,user.organization_id,user.id,"bulk_stage_change","lead",lead.id,{"stage_id":str(stage.id)})
+    db.commit();return {"updated":len(leads),"stage_id":stage.id}
 
 @router.post("/leads",response_model=LeadRead,status_code=201)
 def create_lead(payload:LeadCreate,user:User=Depends(require_permission("crm.create")),db:Session=Depends(get_db)):
