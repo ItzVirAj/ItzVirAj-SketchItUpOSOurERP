@@ -1,0 +1,100 @@
+from datetime import datetime,timezone
+from uuid import UUID
+from fastapi import APIRouter,Depends,HTTPException
+from sqlalchemy import func,select
+from sqlalchemy.orm import Session
+from ...db import get_db
+from ..core.models import User
+from ..core.dependencies import require_permission
+from ..core.audit import record
+from ..crm.models import Lead
+from .models import MarketingChannel,Campaign,CampaignChannel,ContentItem,Gig,Bid,MarketingMetric,BrandAsset
+from .schemas import *
+
+router=APIRouter()
+
+def org_user(db,user,user_id):
+ if user_id is None:return True
+ return db.scalar(select(User.id).where(User.id==user_id,User.organization_id==user.organization_id,User.status=="active")) is not None
+
+def require_org(db,user,model,object_id):
+ obj=db.scalar(select(model).where(model.id==object_id,model.organization_id==user.organization_id))
+ if not obj: raise HTTPException(400,"Referenced record not found in your organization")
+ return obj
+
+@router.get("/channels",response_model=list[ChannelRead])
+def list_channels(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
+ return db.scalars(select(MarketingChannel).where(MarketingChannel.organization_id==user.organization_id).order_by(MarketingChannel.name)).all()
+
+@router.post("/channels",response_model=ChannelRead,status_code=201)
+def create_channel(payload:ChannelCreate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ if not org_user(db,user,payload.owner_user_id): raise HTTPException(400,"Owner must be an active organization user")
+ if db.scalar(select(MarketingChannel).where(MarketingChannel.organization_id==user.organization_id,MarketingChannel.name==payload.name)): raise HTTPException(409,"Channel already exists")
+ obj=MarketingChannel(organization_id=user.organization_id,**payload.model_dump());db.add(obj);db.flush();record(db,user.organization_id,user.id,"create","marketing_channel",obj.id,{"name":obj.name});db.commit();db.refresh(obj);return obj
+
+@router.get("/campaigns",response_model=list[CampaignRead])
+def list_campaigns(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
+ return db.scalars(select(Campaign).where(Campaign.organization_id==user.organization_id).order_by(Campaign.updated_at.desc())).all()
+
+@router.post("/campaigns",response_model=CampaignRead,status_code=201)
+def create_campaign(payload:CampaignCreate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ if payload.starts_at and payload.ends_at and payload.ends_at<=payload.starts_at: raise HTTPException(400,"ends_at must be after starts_at")
+ if not org_user(db,user,payload.owner_user_id): raise HTTPException(400,"Owner must be an active organization user")
+ obj=Campaign(organization_id=user.organization_id,**payload.model_dump());db.add(obj);db.flush();record(db,user.organization_id,user.id,"create","marketing_campaign",obj.id,{"name":obj.name});db.commit();db.refresh(obj);return obj
+
+@router.post("/campaigns/{campaign_id}/channels",status_code=201)
+def add_campaign_channel(campaign_id:UUID,payload:CampaignChannelAdd,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ require_org(db,user,Campaign,campaign_id);require_org(db,user,MarketingChannel,payload.channel_id)
+ if db.scalar(select(CampaignChannel).where(CampaignChannel.campaign_id==campaign_id,CampaignChannel.channel_id==payload.channel_id)): raise HTTPException(409,"Channel already linked")
+ db.add(CampaignChannel(campaign_id=campaign_id,channel_id=payload.channel_id));db.commit();return {"campaign_id":campaign_id,"channel_id":payload.channel_id}
+
+@router.get("/content",response_model=list[ContentRead])
+def list_content(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
+ return db.scalars(select(ContentItem).where(ContentItem.organization_id==user.organization_id).order_by(ContentItem.publish_at.asc().nullslast(),ContentItem.created_at.desc())).all()
+
+@router.post("/content",response_model=ContentRead,status_code=201)
+def create_content(payload:ContentCreate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ if not org_user(db,user,payload.owner_user_id): raise HTTPException(400,"Owner must be an active organization user")
+ if payload.campaign_id: require_org(db,user,Campaign,payload.campaign_id)
+ if payload.channel_id: require_org(db,user,MarketingChannel,payload.channel_id)
+ obj=ContentItem(organization_id=user.organization_id,**payload.model_dump());db.add(obj);db.flush();record(db,user.organization_id,user.id,"create","marketing_content",obj.id,{"title":obj.title});db.commit();db.refresh(obj);return obj
+
+@router.get("/gigs",response_model=list[GigRead])
+def list_gigs(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
+ return db.scalars(select(Gig).where(Gig.organization_id==user.organization_id).order_by(Gig.updated_at.desc())).all()
+
+@router.post("/gigs",response_model=GigRead,status_code=201)
+def create_gig(payload:GigCreate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ obj=Gig(organization_id=user.organization_id,**payload.model_dump());db.add(obj);db.flush();record(db,user.organization_id,user.id,"create","marketing_gig",obj.id,{"title":obj.title});db.commit();db.refresh(obj);return obj
+
+@router.get("/bids",response_model=list[BidRead])
+def list_bids(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
+ return db.scalars(select(Bid).where(Bid.organization_id==user.organization_id).order_by(Bid.created_at.desc())).all()
+
+@router.post("/bids",response_model=BidRead,status_code=201)
+def create_bid(payload:BidCreate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ if payload.gig_id: require_org(db,user,Gig,payload.gig_id)
+ obj=Bid(organization_id=user.organization_id,**payload.model_dump());db.add(obj);db.flush();record(db,user.organization_id,user.id,"create","marketing_bid",obj.id);db.commit();db.refresh(obj);return obj
+
+@router.get("/metrics",response_model=list[MetricRead])
+def list_metrics(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
+ return db.scalars(select(MarketingMetric).where(MarketingMetric.organization_id==user.organization_id).order_by(MarketingMetric.period_start.desc())).all()
+
+@router.post("/metrics",response_model=MetricRead,status_code=201)
+def create_metric(payload:MetricCreate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ if payload.channel_id: require_org(db,user,MarketingChannel,payload.channel_id)
+ if payload.campaign_id: require_org(db,user,Campaign,payload.campaign_id)
+ obj=MarketingMetric(organization_id=user.organization_id,**payload.model_dump());db.add(obj);db.flush();record(db,user.organization_id,user.id,"create","marketing_metric",obj.id);db.commit();db.refresh(obj);return obj
+
+@router.get("/assets",response_model=list[BrandAssetRead])
+def list_assets(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
+ return db.scalars(select(BrandAsset).where(BrandAsset.organization_id==user.organization_id).order_by(BrandAsset.created_at.desc())).all()
+
+@router.post("/assets",response_model=BrandAssetRead,status_code=201)
+def create_asset(payload:BrandAssetCreate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ obj=BrandAsset(organization_id=user.organization_id,created_by_user_id=user.id,**payload.model_dump());db.add(obj);db.flush();record(db,user.organization_id,user.id,"create","marketing_brand_asset",obj.id);db.commit();db.refresh(obj);return obj
+
+@router.get("/attribution",response_model=list[AttributionRead])
+def attribution(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
+ rows=db.execute(select(Campaign.id,Campaign.name,func.count(Lead.id),func.count(Lead.id).filter(Lead.stage_id.in_(select(Lead.stage_id).where(Lead.id==Lead.id))),func.coalesce(func.sum(Lead.estimated_value),0)).join(Lead,Lead.campaign_id==Campaign.id,isouter=True).where(Campaign.organization_id==user.organization_id).group_by(Campaign.id,Campaign.name).order_by(Campaign.name)).all()
+ return [AttributionRead(campaign_id=r[0],campaign_name=r[1],leads=int(r[2]),won_leads=0,estimated_won_value=float(r[4] or 0)) for r in rows]
