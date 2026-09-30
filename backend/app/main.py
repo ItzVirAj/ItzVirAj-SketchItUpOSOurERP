@@ -12,6 +12,7 @@ from .modules.finance.router import router as finance_router
 from .modules.dashboard.router import router as dashboard_router
 from .modules.documents.router import router as documents_router
 from .modules.notifications.router import router as notifications_router
+from .modules.communications.router import router as communications_router
 from .modules.notifications.scheduler import overdue_notification_loop
 @asynccontextmanager
 async def lifespan(app:FastAPI):
