@@ -6,6 +6,7 @@ from ..core.models import User
 from ..core.dependencies import require_permission
 from ..core.audit import record
 from ..crm.models import Client
+from ..notifications.service import create_notification
 from .models import Project,Task
 from .schemas import ProjectCreate,ProjectUpdate,ProjectRead,TaskCreate,TaskUpdate,TaskRead
 router=APIRouter()
@@ -45,7 +46,10 @@ def create_task(project_id,payload:TaskCreate,user:User=Depends(require_permissi
  if not project: raise HTTPException(404,"Project not found")
  if payload.assignee_user_id and not org_user(db,user,payload.assignee_user_id): raise HTTPException(400,"Task assignee must belong to your organization")
  task=Task(organization_id=user.organization_id,project_id=project.id,**payload.model_dump())
- db.add(task);db.flush();record(db,user.organization_id,user.id,"create","task",task.id,{"project_id":str(project.id)});db.commit();db.refresh(task);return task
+ db.add(task);db.flush();record(db,user.organization_id,user.id,"create","task",task.id,{"project_id":str(project.id)})
+ if task.assignee_user_id and task.assignee_user_id!=user.id:
+  create_notification(db,user.organization_id,task.assignee_user_id,"tasks.assignment","Task assigned",f"Task assigned to you in {project.name}.","task",task.id,f"/projects/{project.id}/tasks/{task.id}")
+ db.commit();db.refresh(task);return task
 @router.patch("/{project_id}/tasks/{task_id}",response_model=TaskRead)
 def update_task(project_id,task_id,payload:TaskUpdate,user:User=Depends(require_permission("tasks.create")),db:Session=Depends(get_db)):
  task=db.scalar(select(Task).where(Task.id==task_id,Task.project_id==project_id,Task.organization_id==user.organization_id))
