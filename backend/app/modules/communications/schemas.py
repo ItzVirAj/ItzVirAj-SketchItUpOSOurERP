@@ -14,6 +14,10 @@ class ChannelRead(ChannelCreate):
  created_at:datetime
  updated_at:datetime
 
+class ChannelUnreadRead(BaseModel):
+ channel_id:UUID
+ unread_count:int
+
 class MessageCreate(BaseModel):
  body:str=Field(min_length=1,max_length=10000)
 
