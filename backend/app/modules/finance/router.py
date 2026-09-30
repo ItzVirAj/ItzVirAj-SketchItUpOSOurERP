@@ -59,6 +59,7 @@ def update_invoice_status(invoice_id:UUID,payload:InvoiceStatusUpdate,user:User=
 def invoice_balance(invoice_id:UUID,user:User=Depends(require_permission("finance.read")),db:Session=Depends(get_db)):
  invoice=org_obj(db,Invoice,user,invoice_id)
  if not invoice: raise HTTPException(404,"Invoice not found")
+ if invoice.status not in {"sent","partially_paid","overdue"}: raise HTTPException(400,"Invoice must be sent before recording payment")
  paid=float(db.scalar(select(func.coalesce(func.sum(Payment.amount),0)).where(Payment.invoice_id==invoice.id,Payment.organization_id==user.organization_id)) or 0)
  total=float(invoice.total_amount)
  return {"invoice_id":invoice.id,"total_amount":total,"paid_amount":paid,"balance_amount":max(total-paid,0),"status":invoice.status}
