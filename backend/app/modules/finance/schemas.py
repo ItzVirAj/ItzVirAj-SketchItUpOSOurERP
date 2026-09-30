@@ -1,6 +1,6 @@
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel,Field
+from pydantic import BaseModel,Field,field_validator
 
 class InvoiceCreate(BaseModel):
  invoice_number:str=Field(min_length=1,max_length=80)
@@ -14,6 +14,13 @@ class InvoiceCreate(BaseModel):
  due_at:datetime|None=None
  notes:str|None=None
 
+    @field_validator("currency")
+    @classmethod
+    def valid_currency(cls,value):
+        value=value.upper()
+        if len(value)!=3: raise ValueError("Currency must be a 3-letter ISO code")
+        return value
+
 class InvoiceRead(InvoiceCreate):
  id:UUID
  organization_id:UUID
@@ -21,9 +28,6 @@ class InvoiceRead(InvoiceCreate):
  created_by_user_id:UUID
  created_at:datetime
  updated_at:datetime
-
-class InvoiceStatusUpdate(BaseModel):
- status:str
 
 class MilestoneCreate(BaseModel):
  name:str=Field(min_length=1,max_length=160)
