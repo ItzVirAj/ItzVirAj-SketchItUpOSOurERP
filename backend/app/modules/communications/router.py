@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from ...db import get_db
-from ..core.models import User
+from ..core.models import User, UserRole, Role
 from ..core.dependencies import require_permission
 from ..core.audit import record
 from .models import Channel, ChannelMember, ChannelReadState, Message
@@ -54,6 +54,25 @@ def add_member(channel_id:UUID,payload:MemberAdd,user:User=Depends(require_permi
  db.commit();return {"channel_id":channel.id,"user_id":payload.user_id}
 
 
+
+@router.delete("/channels/{channel_id}/members/{member_user_id}")
+def remove_member(channel_id:UUID,member_user_id:UUID,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
+ channel=get_channel(db,user,channel_id)
+ if not channel: raise HTTPException(404,"Channel not found")
+ target=db.scalar(select(ChannelMember).where(ChannelMember.channel_id==channel.id,ChannelMember.user_id==member_user_id))
+ if not target: raise HTTPException(404,"Channel member not found")
+ roles=db.scalars(
+  select(Role.name)
+  .join(UserRole,UserRole.role_id==Role.id)
+  .where(UserRole.user_id==user.id)
+ ).all()
+ is_admin=bool(set(roles).intersection({"founder_owner","admin_operations"}))
+ if member_user_id!=user.id and channel.created_by_user_id!=user.id and not is_admin:
+  raise HTTPException(403,"Only the channel creator or an administrator can remove another member")
+ db.delete(target)
+ record(db,user.organization_id,user.id,"remove_member","communication_channel",channel.id,{"user_id":str(member_user_id)})
+ db.commit()
+ return {"channel_id":channel.id,"user_id":member_user_id}
 
 @router.get("/channels/unread",response_model=list[ChannelUnreadRead])
 def channel_unread_counts(user:User=Depends(require_permission("communications.read")),db:Session=Depends(get_db)):
