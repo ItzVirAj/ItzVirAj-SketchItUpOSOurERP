@@ -7,7 +7,7 @@ from ...db import get_db
 from ..core.models import User
 from ..core.dependencies import require_permission
 from ..core.audit import record
-from ..crm.models import Lead
+from ..crm.models import Lead,PipelineStage
 from .models import MarketingChannel,Campaign,CampaignChannel,ContentItem,Gig,Bid,MarketingMetric,BrandAsset
 from .schemas import *
 
@@ -96,5 +96,5 @@ def create_asset(payload:BrandAssetCreate,user:User=Depends(require_permission("
 
 @router.get("/attribution",response_model=list[AttributionRead])
 def attribution(user:User=Depends(require_permission("marketing.read")),db:Session=Depends(get_db)):
- rows=db.execute(select(Campaign.id,Campaign.name,func.count(Lead.id),func.count(Lead.id).filter(Lead.stage_id.in_(select(Lead.stage_id).where(Lead.id==Lead.id))),func.coalesce(func.sum(Lead.estimated_value),0)).join(Lead,Lead.campaign_id==Campaign.id,isouter=True).where(Campaign.organization_id==user.organization_id).group_by(Campaign.id,Campaign.name).order_by(Campaign.name)).all()
- return [AttributionRead(campaign_id=r[0],campaign_name=r[1],leads=int(r[2]),won_leads=0,estimated_won_value=float(r[4] or 0)) for r in rows]
+ rows=db.execute(select(Campaign.id,Campaign.name,func.count(Lead.id),func.count(Lead.id).filter(PipelineStage.is_closed_won.is_(True)),func.coalesce(func.sum(Lead.estimated_value).filter(PipelineStage.is_closed_won.is_(True)),0)).join(Lead,Lead.campaign_id==Campaign.id,isouter=True).join(PipelineStage,PipelineStage.id==Lead.stage_id,isouter=True).where(Campaign.organization_id==user.organization_id).group_by(Campaign.id,Campaign.name).order_by(Campaign.name)).all()
+ return [AttributionRead(campaign_id=r[0],campaign_name=r[1],leads=int(r[2]),won_leads=int(r[3]),estimated_won_value=float(r[4] or 0)) for r in rows]
