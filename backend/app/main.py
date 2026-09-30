@@ -9,6 +9,7 @@ from .modules.sales.router import router as sales_router
 from .modules.finance.router import router as finance_router
 from .modules.dashboard.router import router as dashboard_router
 from .modules.documents.router import router as documents_router
+from .modules.notifications.router import router as notifications_router
 app=FastAPI(title="SketchItUp Owner OS API",version="0.1.0")
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_list,allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 app.include_router(core_router,prefix="/api/v1")
@@ -19,5 +20,6 @@ app.include_router(sales_router,prefix="/api/v1/sales",tags=["sales"])
 app.include_router(finance_router,prefix="/api/v1/finance",tags=["finance"])
 app.include_router(dashboard_router,prefix="/api/v1/dashboard",tags=["dashboard"])
 app.include_router(documents_router,prefix="/api/v1/documents",tags=["documents"])
+app.include_router(notifications_router,prefix="/api/v1/notifications",tags=["notifications"])
 @app.get("/api/v1/health")
 def health(): return {"status":"ok","database":"configured"}
