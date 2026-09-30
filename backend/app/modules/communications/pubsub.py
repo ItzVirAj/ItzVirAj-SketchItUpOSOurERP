@@ -26,7 +26,10 @@ class RealtimeBus:
    async for item in pubsub.listen():
     if item.get("type")!="message":continue
     payload=json.loads(item["data"])
-    await manager.send_to_user(UUID(payload["user_id"]),payload["event"])
+    event=payload.get("event")
+    if not isinstance(event,dict):continue
+    user_ids=payload.get("user_ids",[])
+    await manager.broadcast([UUID(value) for value in user_ids],event)
   except asyncio.CancelledError:
    raise
   except Exception:
@@ -37,8 +40,8 @@ class RealtimeBus:
  async def publish(self,user_ids:list[UUID],event:dict):
   if not self.redis:return False
   try:
-   for user_id in set(user_ids):
-    await self.redis.publish("sketchitup:communications",json.dumps({"user_id":str(user_id),"event":event}))
+   payload={"user_ids":[str(user_id) for user_id in set(user_ids)],"event":event}
+   await self.redis.publish("sketchitup:communications",json.dumps(payload))
    return True
   except Exception:
    return False
