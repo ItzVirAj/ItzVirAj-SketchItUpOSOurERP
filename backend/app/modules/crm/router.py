@@ -9,7 +9,7 @@ from ..core.dependencies import require_permission
 from ..core.audit import record
 from ..projects.models import Project
 from .models import Client,Contact,Lead,LeadActivity,LeadFollowUp,Pipeline,PipelineStage
-from .schemas import ClientCreate,ClientUpdate,ClientRead,ContactCreate,ContactRead,LeadCreate,LeadUpdate,LeadRead,ActivityCreate,ActivityRead,FollowUpCreate,FollowUpRead,PipelineRead,StageRead,LeadConversionRead
+from .schemas import ClientCreate,ClientUpdate,ClientRead,ContactCreate,ContactRead,LeadCreate,LeadUpdate,LeadRead,ActivityCreate,ActivityRead,FollowUpCreate,FollowUpComplete,FollowUpRead,PipelineRead,StageRead,LeadConversionRead
 
 router=APIRouter()
 
@@ -117,6 +117,21 @@ def create_follow_up(lead_id:UUID,payload:FollowUpCreate,user:User=Depends(requi
     follow=LeadFollowUp(organization_id=user.organization_id,lead_id=lead.id,assigned_user_id=lead.owner_user_id or user.id,**payload.model_dump())
     db.add(follow);db.flush();lead.next_follow_up_at=payload.due_at;lead.updated_at=datetime.now(timezone.utc)
     record(db,user.organization_id,user.id,"create","lead_follow_up",follow.id,{"lead_id":str(lead.id)});db.commit();db.refresh(follow);return follow
+
+@router.post("/leads/{lead_id}/follow-ups/{follow_up_id}/complete",response_model=FollowUpRead)
+def complete_follow_up(lead_id:UUID,follow_up_id:UUID,payload:FollowUpComplete|None=None,user:User=Depends(require_permission("crm.create")),db:Session=Depends(get_db)):
+    lead=db.scalar(select(Lead).where(Lead.id==lead_id,Lead.organization_id==user.organization_id))
+    if not lead: raise HTTPException(404,"Lead not found")
+    follow=db.scalar(select(LeadFollowUp).where(LeadFollowUp.id==follow_up_id,LeadFollowUp.lead_id==lead_id,LeadFollowUp.organization_id==user.organization_id))
+    if not follow: raise HTTPException(404,"Follow-up not found")
+    if follow.completed_at: return follow
+    follow.completed_at=datetime.now(timezone.utc)
+    if payload and payload.notes is not None: follow.notes=payload.notes
+    next_follow=db.scalar(select(LeadFollowUp).where(LeadFollowUp.lead_id==lead_id,LeadFollowUp.organization_id==user.organization_id,LeadFollowUp.completed_at.is_(None),LeadFollowUp.id!=follow.id).order_by(LeadFollowUp.due_at).limit(1))
+    lead.next_follow_up_at=next_follow.due_at if next_follow else None
+    lead.updated_at=datetime.now(timezone.utc)
+    record(db,user.organization_id,user.id,"complete","lead_follow_up",follow.id,{"lead_id":str(lead_id)})
+    db.commit();db.refresh(follow);return follow
 
 @router.get("/leads/{lead_id}/follow-ups",response_model=list[FollowUpRead])
 def list_follow_ups(lead_id:UUID,user:User=Depends(require_permission("crm.read")),db:Session=Depends(get_db)):
