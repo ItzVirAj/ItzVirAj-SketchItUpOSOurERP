@@ -12,14 +12,14 @@ async def overdue_notification_loop():
   try:
    db=SessionLocal()
    try:
-    locked=bool(db.scalar(select(text("pg_try_advisory_lock(:key)")).params(key=_LOCK_KEY)))
+    locked=bool(db.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key":_LOCK_KEY}))
     if locked:
      try:
       org_ids=db.scalars(select(Organization.id)).all()
       for organization_id in org_ids:
        generate_overdue_notifications(db,organization_id)
      finally:
-      db.execute(text("SELECT pg_advisory_unlock(:key)")).params(key=_LOCK_KEY)
+      db.execute(text("SELECT pg_advisory_unlock(:key)"), {"key":_LOCK_KEY})
       db.commit()
    finally:
     db.close()
