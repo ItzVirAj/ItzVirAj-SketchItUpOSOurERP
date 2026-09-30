@@ -136,6 +136,8 @@ def update_contract_status(contract_id:UUID,payload:ContractStatusUpdate,user:Us
     contract.status=status
     contract.updated_at=datetime.now(timezone.utc)
     record(db,user.organization_id,user.id,"status_change","contract",contract.id,{"from":current,"to":status})
+    if contract.created_by_user_id:
+        create_notification(db,user.organization_id,contract.created_by_user_id,"sales.contract_status","Contract status changed",f"Contract {contract.title} moved from {current} to {status}.","contract",contract.id,f"/sales/contracts/{contract.id}")
     db.commit();db.refresh(contract);return contract
 
 @router.patch("/contracts/{contract_id}",response_model=ContractRead)
