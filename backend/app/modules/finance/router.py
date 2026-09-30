@@ -8,6 +8,8 @@ from ..core.models import User
 from ..core.dependencies import require_permission
 from ..core.audit import record
 from .models import Invoice,InvoiceMilestone,Payment
+from .expense_models import Expense
+from .expense_schemas import ExpenseCreate,ExpenseRead
 from .schemas import InvoiceCreate,InvoiceRead,InvoiceStatusUpdate,MilestoneCreate,MilestoneRead,PaymentCreate,PaymentRead
 router=APIRouter()
 def org_obj(db,model,user,obj_id): return db.scalar(select(model).where(model.id==obj_id,model.organization_id==user.organization_id))
@@ -29,6 +31,27 @@ def create_contract_invoice(contract_id:UUID,user:User=Depends(require_permissio
   db.add(milestone)
  record(db,user.organization_id,user.id,"create","invoice",invoice.id,{"contract_id":str(contract.id),"invoice_number":number})
  db.commit();db.refresh(invoice);return invoice
+
+
+@router.get("/expenses",response_model=list[ExpenseRead])
+def list_expenses(user:User=Depends(require_permission("finance.expenses.read")),db:Session=Depends(get_db)):
+ return db.scalars(select(Expense).where(Expense.organization_id==user.organization_id).order_by(Expense.incurred_at.desc())).all()
+
+@router.post("/expenses",response_model=ExpenseRead,status_code=201)
+def create_expense(payload:ExpenseCreate,user:User=Depends(require_permission("finance.expenses.create")),db:Session=Depends(get_db)):
+ if payload.project_id:
+  from ..projects.models import Project
+  if not org_obj(db,Project,user,payload.project_id): raise HTTPException(400,"Project not found")
+ expense=Expense(organization_id=user.organization_id,created_by_user_id=user.id,**payload.model_dump())
+ db.add(expense);db.flush();record(db,user.organization_id,user.id,"create","expense",expense.id,{"category":expense.category,"amount":float(expense.amount)});db.commit();db.refresh(expense);return expense
+
+@router.get("/summary")
+def finance_summary(user:User=Depends(require_permission("finance.read")),db:Session=Depends(get_db)):
+ invoiced=float(db.scalar(select(func.coalesce(func.sum(Invoice.total_amount),0)).where(Invoice.organization_id==user.organization_id,Invoice.status!="cancelled")) or 0)
+ collected=float(db.scalar(select(func.coalesce(func.sum(Payment.amount),0)).where(Payment.organization_id==user.organization_id)) or 0)
+ expenses=float(db.scalar(select(func.coalesce(func.sum(Expense.amount),0)).where(Expense.organization_id==user.organization_id)) or 0)
+ outstanding=max(invoiced-collected,0)
+ return {"invoiced":invoiced,"collected":collected,"outstanding":outstanding,"expenses":expenses,"net_collected":collected-expenses}
 
 @router.get("/invoices",response_model=list[InvoiceRead])
 def list_invoices(user:User=Depends(require_permission("finance.read")),db:Session=Depends(get_db)): return db.scalars(select(Invoice).where(Invoice.organization_id==user.organization_id).order_by(Invoice.created_at.desc())).all()
