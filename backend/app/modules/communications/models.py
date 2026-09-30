@@ -14,6 +14,7 @@ class Channel(BaseModel):
  created_by_user_id:Mapped[UUID]=mapped_column(ForeignKey("users.id"))
  created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
  updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+ archived_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
 
 class ChannelMember(BaseModel):
  __tablename__="communication_channel_members"
