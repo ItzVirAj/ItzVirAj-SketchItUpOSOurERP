@@ -162,7 +162,10 @@ def create_follow_up(lead_id:UUID,payload:FollowUpCreate,user:User=Depends(requi
     if not lead: raise HTTPException(404,"Lead not found")
     follow=LeadFollowUp(organization_id=user.organization_id,lead_id=lead.id,assigned_user_id=lead.owner_user_id or user.id,**payload.model_dump())
     db.add(follow);db.flush();lead.next_follow_up_at=payload.due_at;lead.updated_at=datetime.now(timezone.utc)
-    record(db,user.organization_id,user.id,"create","lead_follow_up",follow.id,{"lead_id":str(lead.id)});db.commit();db.refresh(follow);return follow
+    record(db,user.organization_id,user.id,"create","lead_follow_up",follow.id,{"lead_id":str(lead.id)})
+    if follow.assigned_user_id:
+        create_notification(db,user.organization_id,follow.assigned_user_id,"crm.follow_up","New CRM follow-up",f"Follow-up for {lead.name} is due.","lead",lead.id,f"/crm/leads/{lead.id}")
+    db.commit();db.refresh(follow);return follow
 
 @router.post("/leads/{lead_id}/follow-ups/{follow_up_id}/complete",response_model=FollowUpRead)
 def complete_follow_up(lead_id:UUID,follow_up_id:UUID,payload:FollowUpComplete|None=None,user:User=Depends(require_permission("crm.create")),db:Session=Depends(get_db)):
