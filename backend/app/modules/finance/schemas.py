@@ -14,12 +14,12 @@ class InvoiceCreate(BaseModel):
  due_at:datetime|None=None
  notes:str|None=None
 
-    @field_validator("currency")
-    @classmethod
-    def valid_currency(cls,value):
-        value=value.upper()
-        if len(value)!=3: raise ValueError("Currency must be a 3-letter ISO code")
-        return value
+ @field_validator("currency")
+ @classmethod
+ def valid_currency(cls,value):
+  value=value.upper()
+  if len(value)!=3: raise ValueError("Currency must be a 3-letter ISO code")
+  return value
 
 class InvoiceRead(InvoiceCreate):
  id:UUID
