@@ -11,6 +11,25 @@ from .models import Invoice,InvoiceMilestone,Payment
 from .schemas import InvoiceCreate,InvoiceRead,MilestoneCreate,MilestoneRead,PaymentCreate,PaymentRead
 router=APIRouter()
 def org_obj(db,model,user,obj_id): return db.scalar(select(model).where(model.id==obj_id,model.organization_id==user.organization_id))
+
+@router.post("/contracts/{contract_id}/invoice",response_model=InvoiceRead,status_code=201)
+def create_contract_invoice(contract_id:UUID,user:User=Depends(require_permission("finance.create")),db:Session=Depends(get_db)):
+ from ..sales.models import Contract
+ contract=org_obj(db,Contract,user,contract_id)
+ if not contract: raise HTTPException(404,"Contract not found")
+ if contract.status not in {"signed","active"}: raise HTTPException(400,"Contract must be signed or active before invoicing")
+ existing=db.scalar(select(Invoice).where(Invoice.organization_id==user.organization_id,Invoice.contract_id==contract.id))
+ if existing: raise HTTPException(409,"An invoice already exists for this contract")
+ number=f"INV-{datetime.now(timezone.utc):%Y%m%d}-{str(contract.id)[:8].upper()}"
+ total=float(contract.value or 0)
+ invoice=Invoice(organization_id=user.organization_id,client_id=contract.client_id,project_id=contract.project_id,contract_id=contract.id,invoice_number=number,status="draft",currency=contract.currency,subtotal=total,total_amount=total,created_by_user_id=user.id)
+ db.add(invoice);db.flush()
+ if total>0:
+  milestone=InvoiceMilestone(organization_id=user.organization_id,invoice_id=invoice.id,name="Contract billing milestone",percentage=100,amount=total,due_at=contract.start_date,status="pending")
+  db.add(milestone)
+ record(db,user.organization_id,user.id,"create","invoice",invoice.id,{"contract_id":str(contract.id),"invoice_number":number})
+ db.commit();db.refresh(invoice);return invoice
+
 @router.get("/invoices",response_model=list[InvoiceRead])
 def list_invoices(user:User=Depends(require_permission("finance.read")),db:Session=Depends(get_db)): return db.scalars(select(Invoice).where(Invoice.organization_id==user.organization_id).order_by(Invoice.created_at.desc())).all()
 @router.post("/invoices",response_model=InvoiceRead,status_code=201)
