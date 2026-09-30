@@ -8,7 +8,7 @@ from ..core.models import User
 from ..core.dependencies import require_permission
 from ..core.audit import record
 from .models import Invoice,InvoiceMilestone,Payment
-from .schemas import InvoiceCreate,InvoiceRead,MilestoneCreate,MilestoneRead,PaymentCreate,PaymentRead
+from .schemas import InvoiceCreate,InvoiceRead,InvoiceStatusUpdate,MilestoneCreate,MilestoneRead,PaymentCreate,PaymentRead
 router=APIRouter()
 def org_obj(db,model,user,obj_id): return db.scalar(select(model).where(model.id==obj_id,model.organization_id==user.organization_id))
 
@@ -43,6 +43,26 @@ def create_invoice(payload:InvoiceCreate,user:User=Depends(require_permission("f
  if payload.total_amount<0 or payload.subtotal<0 or payload.tax_amount<0: raise HTTPException(400,"Invoice amounts cannot be negative")
  if db.scalar(select(Invoice).where(Invoice.invoice_number==payload.invoice_number)): raise HTTPException(409,"Invoice number already exists")
  invoice=Invoice(organization_id=user.organization_id,created_by_user_id=user.id,**payload.model_dump());db.add(invoice);db.flush();record(db,user.organization_id,user.id,"create","invoice",invoice.id,{"invoice_number":invoice.invoice_number});db.commit();db.refresh(invoice);return invoice
+
+@router.post("/invoices/{invoice_id}/status",response_model=InvoiceRead)
+def update_invoice_status(invoice_id:UUID,payload:InvoiceStatusUpdate,user:User=Depends(require_permission("finance.create")),db:Session=Depends(get_db)):
+ invoice=org_obj(db,Invoice,user,invoice_id)
+ if not invoice: raise HTTPException(404,"Invoice not found")
+ allowed={"draft":{"sent","cancelled"},"sent":{"cancelled"},"partially_paid":{"cancelled"},"paid":set(),"overdue":{"cancelled"},"cancelled":set()}
+ current=invoice.status
+ if payload.status not in allowed.get(current,set()): raise HTTPException(400,f"Invalid invoice transition: {current} -> {payload.status}")
+ invoice.status=payload.status;invoice.updated_at=datetime.now(timezone.utc)
+ record(db,user.organization_id,user.id,"status_change","invoice",invoice.id,{"from":current,"to":payload.status})
+ db.commit();db.refresh(invoice);return invoice
+
+@router.get("/invoices/{invoice_id}/balance")
+def invoice_balance(invoice_id:UUID,user:User=Depends(require_permission("finance.read")),db:Session=Depends(get_db)):
+ invoice=org_obj(db,Invoice,user,invoice_id)
+ if not invoice: raise HTTPException(404,"Invoice not found")
+ paid=float(db.scalar(select(func.coalesce(func.sum(Payment.amount),0)).where(Payment.invoice_id==invoice.id,Payment.organization_id==user.organization_id)) or 0)
+ total=float(invoice.total_amount)
+ return {"invoice_id":invoice.id,"total_amount":total,"paid_amount":paid,"balance_amount":max(total-paid,0),"status":invoice.status}
+
 @router.post("/invoices/{invoice_id}/milestones",response_model=MilestoneRead,status_code=201)
 def create_milestone(invoice_id:UUID,payload:MilestoneCreate,user:User=Depends(require_permission("finance.create")),db:Session=Depends(get_db)):
  invoice=org_obj(db,Invoice,user,invoice_id)
