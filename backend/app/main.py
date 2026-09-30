@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
@@ -10,7 +12,18 @@ from .modules.finance.router import router as finance_router
 from .modules.dashboard.router import router as dashboard_router
 from .modules.documents.router import router as documents_router
 from .modules.notifications.router import router as notifications_router
-app=FastAPI(title="SketchItUp Owner OS API",version="0.1.0")
+from .modules.notifications.scheduler import overdue_notification_loop
+@asynccontextmanager
+async def lifespan(app:FastAPI):
+ task=asyncio.create_task(overdue_notification_loop())
+ try:
+  yield
+ finally:
+  task.cancel()
+  try: await task
+  except asyncio.CancelledError: pass
+
+app=FastAPI(title="SketchItUp Owner OS API",version="0.1.0",lifespan=lifespan)
 app.add_middleware(CORSMiddleware,allow_origins=settings.cors_list,allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 app.include_router(core_router,prefix="/api/v1")
 app.include_router(projects_router,prefix="/api/v1/projects",tags=["projects"])
