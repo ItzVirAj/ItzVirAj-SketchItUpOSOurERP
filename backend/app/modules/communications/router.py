@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, and_
 from sqlalchemy.orm import Session
 from ...db import get_db
 from ..core.models import User
@@ -49,7 +49,8 @@ def add_member(channel_id:UUID,payload:MemberAdd,user:User=Depends(require_permi
   raise HTTPException(409,"User is already a channel member")
  db.add(ChannelMember(channel_id=channel.id,user_id=payload.user_id))
  record(db,user.organization_id,user.id,"add_member","communication_channel",channel.id,{"user_id":str(payload.user_id)})
- create_notification(db,user.organization_id,payload.user_id,"communications.channel_member_added","Added to private channel",f"You were added to #{channel.name}.","communication_channel",channel.id,f"/communications/channels/{channel.id}")
+ if channel.channel_type=="private":
+  create_notification(db,user.organization_id,payload.user_id,"communications.channel_member_added","Added to private channel",f"You were added to #{channel.name}.","communication_channel",channel.id,f"/communications/channels/{channel.id}")
  db.commit();return {"channel_id":channel.id,"user_id":payload.user_id}
 
 
