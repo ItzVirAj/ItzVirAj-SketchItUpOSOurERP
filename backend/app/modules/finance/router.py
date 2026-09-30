@@ -109,4 +109,7 @@ def create_payment(invoice_id:UUID,payload:PaymentCreate,user:User=Depends(requi
  if paid+payload.amount>float(invoice.total_amount): raise HTTPException(400,"Payment exceeds invoice balance")
  payment=Payment(organization_id=user.organization_id,invoice_id=invoice.id,created_by_user_id=user.id,**payload.model_dump());db.add(payment)
  invoice.status="paid" if paid+payload.amount>=float(invoice.total_amount) else "partially_paid";invoice.updated_at=datetime.now(timezone.utc)
- db.flush();record(db,user.organization_id,user.id,"create","payment",payment.id,{"invoice_id":str(invoice.id),"amount":payload.amount});db.commit();db.refresh(payment);return payment
+ db.flush();record(db,user.organization_id,user.id,"create","payment",payment.id,{"invoice_id":str(invoice.id),"amount":payload.amount})
+ if invoice.created_by_user_id:
+  create_notification(db,user.organization_id,invoice.created_by_user_id,"finance.payment","Payment recorded",f"Payment of {payload.amount} {invoice.currency} was recorded for {invoice.invoice_number}.","invoice",invoice.id,f"/finance/invoices/{invoice.id}")
+ db.commit();db.refresh(payment);return payment
