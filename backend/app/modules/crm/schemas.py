@@ -140,3 +140,7 @@ class StageRead(BaseModel):
     probability:float
     is_closed_won:bool
     is_closed_lost:bool
+
+class LeadBulkStageUpdate(BaseModel):
+    lead_ids:list[UUID]=Field(min_length=1,max_length=100)
+    stage_id:UUID
