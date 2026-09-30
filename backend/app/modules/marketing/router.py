@@ -191,6 +191,7 @@ def update_content(content_id:UUID,payload:ContentUpdate,user:User=Depends(requi
  obj=require_org(db,user,ContentItem,content_id);data=payload.model_dump(exclude_unset=True)
  if "campaign_id" in data and data["campaign_id"]: require_org(db,user,Campaign,data["campaign_id"])
  if "channel_id" in data and data["channel_id"]: require_org(db,user,MarketingChannel,data["channel_id"])
+ if "owner_user_id" in data and not org_user(db,user,data["owner_user_id"]): raise HTTPException(400,"Owner must be an active organization user")
  if "approval_status" in data:
   new=data["approval_status"]
   if new not in CONTENT_TRANSITIONS: raise HTTPException(400,"Invalid content workflow status")
@@ -200,13 +201,17 @@ def update_content(content_id:UUID,payload:ContentUpdate,user:User=Depends(requi
 
 @router.patch("/gigs/{gig_id}",response_model=GigRead)
 def update_gig(gig_id:UUID,payload:GigUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
- obj=require_org(db,user,Gig,gig_id);update_fields(obj,payload);record(db,user.organization_id,user.id,"update","marketing_gig",obj.id,payload.model_dump(exclude_unset=True));db.commit();db.refresh(obj);return obj
+ obj=require_org(db,user,Gig,gig_id);data=payload.model_dump(exclude_unset=True)
+ if any(data.get(k) is not None and data[k] < 0 for k in ("impressions","clicks","inquiries","orders","reviews")): raise HTTPException(400,"Gig counters cannot be negative")
+ update_fields(obj,payload);record(db,user.organization_id,user.id,"update","marketing_gig",obj.id,payload.model_dump(exclude_unset=True));db.commit();db.refresh(obj);return obj
 
 @router.patch("/bids/{bid_id}",response_model=BidRead)
 def update_bid(bid_id:UUID,payload:BidUpdate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
  obj=require_org(db,user,Bid,bid_id);data=payload.model_dump(exclude_unset=True)
  if "gig_id" in data and data["gig_id"]: require_org(db,user,Gig,data["gig_id"])
  if "status" in data and data["status"] not in {"sent","viewed","interview","hired","declined"}: raise HTTPException(400,"Invalid bid status")
+ if "bid_amount" in data and data["bid_amount"] is not None and data["bid_amount"] < 0: raise HTTPException(400,"bid_amount cannot be negative")
+ if "connects_used" in data and data["connects_used"] is not None and data["connects_used"] < 0: raise HTTPException(400,"connects_used cannot be negative")
  update_fields(obj,payload);record(db,user.organization_id,user.id,"update","marketing_bid",obj.id,data);db.commit();db.refresh(obj);return obj
 
 @router.patch("/metrics/{metric_id}",response_model=MetricRead)
@@ -251,6 +256,8 @@ def create_content(payload:ContentCreate,user:User=Depends(require_permission("m
  if not org_user(db,user,payload.owner_user_id): raise HTTPException(400,"Owner must be an active organization user")
  if payload.campaign_id: require_org(db,user,Campaign,payload.campaign_id)
  if payload.channel_id: require_org(db,user,MarketingChannel,payload.channel_id)
+ if payload.approval_status not in CONTENT_TRANSITIONS: raise HTTPException(400,"Invalid content workflow status")
+ if payload.approval_status in {"scheduled","published"} and not payload.publish_at: raise HTTPException(400,"publish_at is required when scheduling or publishing content")
  obj=ContentItem(organization_id=user.organization_id,**payload.model_dump());db.add(obj);db.flush();record(db,user.organization_id,user.id,"create","marketing_content",obj.id,{"title":obj.title});db.commit();db.refresh(obj);return obj
 
 @router.get("/gigs",response_model=list[GigRead])
@@ -259,6 +266,7 @@ def list_gigs(user:User=Depends(require_permission("marketing.read")),db:Session
 
 @router.post("/gigs",response_model=GigRead,status_code=201)
 def create_gig(payload:GigCreate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
+ if any(v < 0 for v in (payload.impressions,payload.clicks,payload.inquiries,payload.orders,payload.reviews)): raise HTTPException(400,"Gig counters cannot be negative")
  obj=Gig(organization_id=user.organization_id,**payload.model_dump());db.add(obj);db.flush();record(db,user.organization_id,user.id,"create","marketing_gig",obj.id,{"title":obj.title});db.commit();db.refresh(obj);return obj
 
 @router.get("/bids",response_model=list[BidRead])
@@ -268,6 +276,9 @@ def list_bids(user:User=Depends(require_permission("marketing.read")),db:Session
 @router.post("/bids",response_model=BidRead,status_code=201)
 def create_bid(payload:BidCreate,user:User=Depends(require_permission("marketing.create")),db:Session=Depends(get_db)):
  if payload.gig_id: require_org(db,user,Gig,payload.gig_id)
+ if payload.status not in {"sent","viewed","interview","hired","declined"}: raise HTTPException(400,"Invalid bid status")
+ if payload.bid_amount is not None and payload.bid_amount < 0: raise HTTPException(400,"bid_amount cannot be negative")
+ if payload.connects_used is not None and payload.connects_used < 0: raise HTTPException(400,"connects_used cannot be negative")
  obj=Bid(organization_id=user.organization_id,**payload.model_dump());db.add(obj);db.flush();record(db,user.organization_id,user.id,"create","marketing_bid",obj.id);db.commit();db.refresh(obj);return obj
 
 @router.get("/metrics",response_model=list[MetricRead])
