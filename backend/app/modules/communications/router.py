@@ -1,0 +1,79 @@
+from datetime import datetime, timezone
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select, delete
+from sqlalchemy.orm import Session
+from ...db import get_db
+from ..core.models import User
+from ..core.dependencies import require_permission
+from ..core.audit import record
+from .models import Channel, ChannelMember, Message
+from .schemas import ChannelCreate, ChannelRead, MessageCreate, MessageRead, MemberAdd
+
+router=APIRouter()
+
+def get_channel(db:Session,user:User,channel_id:UUID):
+ return db.scalar(select(Channel).where(Channel.id==channel_id,Channel.organization_id==user.organization_id))
+
+def can_access(db:Session,user:User,channel:Channel):
+ if channel.channel_type=="public": return True
+ return db.scalar(select(ChannelMember).where(ChannelMember.channel_id==channel.id,ChannelMember.user_id==user.id)) is not None
+
+@router.get("/channels",response_model=list[ChannelRead])
+def list_channels(user:User=Depends(require_permission("communications.read")),db:Session=Depends(get_db)):
+ channels=db.scalars(select(Channel).where(Channel.organization_id==user.organization_id).order_by(Channel.name.asc())).all()
+ return [c for c in channels if c.channel_type=="public" or can_access(db,user,c)]
+
+@router.post("/channels",response_model=ChannelRead,status_code=201)
+def create_channel(payload:ChannelCreate,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
+ if payload.channel_type not in {"public","private"}:
+  raise HTTPException(400,"channel_type must be public or private")
+ existing=db.scalar(select(Channel).where(Channel.organization_id==user.organization_id,Channel.name==payload.name))
+ if existing: raise HTTPException(409,"A channel with this name already exists")
+ channel=Channel(organization_id=user.organization_id,created_by_user_id=user.id,**payload.model_dump())
+ db.add(channel);db.flush()
+ db.add(ChannelMember(channel_id=channel.id,user_id=user.id))
+ record(db,user.organization_id,user.id,"create","communication_channel",channel.id,{"name":channel.name})
+ db.commit();db.refresh(channel);return channel
+
+@router.post("/channels/{channel_id}/members",status_code=201)
+def add_member(channel_id:UUID,payload:MemberAdd,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
+ channel=get_channel(db,user,channel_id)
+ if not channel: raise HTTPException(404,"Channel not found")
+ member_user=db.scalar(select(User).where(User.id==payload.user_id,User.organization_id==user.organization_id,User.status=="active"))
+ if not member_user: raise HTTPException(400,"User must belong to your organization and be active")
+ if db.scalar(select(ChannelMember).where(ChannelMember.channel_id==channel.id,ChannelMember.user_id=payload.user_id)):
+  raise HTTPException(409,"User is already a channel member")
+ db.add(ChannelMember(channel_id=channel.id,user_id=payload.user_id))
+ record(db,user.organization_id,user.id,"add_member","communication_channel",channel.id,{"user_id":str(payload.user_id)})
+ db.commit();return {"channel_id":channel.id,"user_id":payload.user_id}
+
+@router.get("/channels/{channel_id}/messages",response_model=list[MessageRead])
+def list_messages(channel_id:UUID,user:User=Depends(require_permission("communications.read")),db:Session=Depends(get_db),limit:int=50,before:datetime|None=None):
+ channel=get_channel(db,user,channel_id)
+ if not channel or not can_access(db,user,channel): raise HTTPException(404,"Channel not found")
+ limit=max(1,min(limit,100))
+ q=select(Message).where(Message.organization_id==user.organization_id,Message.channel_id==channel.id)
+ if before:q=q.where(Message.created_at<before)
+ return db.scalars(q.order_by(Message.created_at.desc()).limit(limit)).all()
+
+@router.post("/channels/{channel_id}/messages",response_model=MessageRead,status_code=201)
+def send_message(channel_id:UUID,payload:MessageCreate,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
+ channel=get_channel(db,user,channel_id)
+ if not channel or not can_access(db,user,channel): raise HTTPException(404,"Channel not found")
+ message=Message(organization_id=user.organization_id,channel_id=channel.id,sender_user_id=user.id,body=payload.body.strip())
+ if not message.body: raise HTTPException(400,"Message body cannot be empty")
+ db.add(message);db.flush()
+ record(db,user.organization_id,user.id,"create","communication_message",message.id,{"channel_id":str(channel.id)})
+ db.commit();db.refresh(message);return message
+
+@router.patch("/messages/{message_id}",response_model=MessageRead)
+def edit_message(message_id:UUID,payload:MessageCreate,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
+ message=db.scalar(select(Message).where(Message.id==message_id,Message.organization_id==user.organization_id))
+ if not message: raise HTTPException(404,"Message not found")
+ if message.sender_user_id!=user.id: raise HTTPException(403,"You can only edit your own messages")
+ body=payload.body.strip()
+ if not body: raise HTTPException(400,"Message body cannot be empty")
+ message.body=body;message.is_edited=True;message.updated_at=datetime.now(timezone.utc)
+ record(db,user.organization_id,user.id,"update","communication_message",message.id)
+ db.commit();db.refresh(message);return message
