@@ -119,7 +119,11 @@ async def edit_message(message_id:UUID,payload:MessageCreate,user:User=Depends(r
  message.body=body;message.is_edited=True;message.updated_at=datetime.now(timezone.utc)
  record(db,user.organization_id,user.id,"update","communication_message",message.id)
  db.commit();db.refresh(message)
- recipients=db.scalars(select(ChannelMember.user_id).where(ChannelMember.channel_id==message.channel_id,ChannelMember.user_id!=user.id)).all()
+ channel=db.get(Channel,message.channel_id)
+ if channel and channel.channel_type=="public":
+  recipients=db.scalars(select(User.id).where(User.organization_id==user.organization_id,User.status=="active",User.id!=user.id)).all()
+ else:
+  recipients=db.scalars(select(ChannelMember.user_id).where(ChannelMember.channel_id==message.channel_id,ChannelMember.user_id!=user.id)).all()
  if message.channel_id:
   event={"type":"message.updated","channel_id":str(message.channel_id),"message":{"id":str(message.id),"sender_user_id":str(message.sender_user_id),"body":message.body,"is_edited":message.is_edited,"updated_at":message.updated_at.isoformat()}}
   if not await bus.publish(recipients,event):
