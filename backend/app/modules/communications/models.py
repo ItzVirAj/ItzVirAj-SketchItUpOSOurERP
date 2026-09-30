@@ -21,6 +21,12 @@ class ChannelMember(BaseModel):
  user_id:Mapped[UUID]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),primary_key=True)
  joined_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
 
+class ChannelReadState(BaseModel):
+ __tablename__="communication_channel_read_states"
+ channel_id:Mapped[UUID]=mapped_column(ForeignKey("communication_channels.id",ondelete="CASCADE"),primary_key=True)
+ user_id:Mapped[UUID]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),primary_key=True)
+ last_read_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=lambda:datetime.now(timezone.utc))
+
 class Message(BaseModel):
  __tablename__="communication_messages"
  id:Mapped[UUID]=mapped_column(primary_key=True,default=uuid4)
