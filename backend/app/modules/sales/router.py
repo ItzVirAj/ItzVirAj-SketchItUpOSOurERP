@@ -103,6 +103,37 @@ def create_contract(payload:ContractCreate,user:User=Depends(require_permission(
     contract=Contract(organization_id=user.organization_id,created_by_user_id=user.id,**payload.model_dump())
     db.add(contract);db.flush();record(db,user.organization_id,user.id,"create","contract",contract.id,{"title":contract.title});db.commit();db.refresh(contract);return contract
 
+@router.post("/contracts/{contract_id}/status",response_model=ContractRead)
+def update_contract_status(contract_id:UUID,status:str,user:User=Depends(require_permission("sales.create")),db:Session=Depends(get_db)):
+    contract=org_obj(db,Contract,user,contract_id)
+    if not contract: raise HTTPException(404,"Contract not found")
+    allowed={
+        "draft":{"sent","terminated"},
+        "sent":{"signed","terminated"},
+        "signed":{"active","terminated"},
+        "active":{"completed","terminated"},
+        "completed":set(),
+        "terminated":set(),
+    }
+    current=contract.status
+    if status not in allowed.get(current,set()):
+        raise HTTPException(400,f"Invalid contract transition: {current} -> {status}")
+    if status=="signed" and not contract.signed_at:
+        contract.signed_at=datetime.now(timezone.utc)
+    if status=="active" and not contract.signed_at:
+        raise HTTPException(400,"Contract must be signed before activation")
+    if status=="active" and contract.project_id:
+        from ..projects.models import Project
+        project=org_obj(db,Project,user,contract.project_id)
+        if not project: raise HTTPException(400,"Contract project not found")
+        if project.status in {"planned","draft"}:
+            project.status="active"
+            project.updated_at=datetime.now(timezone.utc)
+    contract.status=status
+    contract.updated_at=datetime.now(timezone.utc)
+    record(db,user.organization_id,user.id,"status_change","contract",contract.id,{"from":current,"to":status})
+    db.commit();db.refresh(contract);return contract
+
 @router.patch("/contracts/{contract_id}",response_model=ContractRead)
 def update_contract(contract_id:UUID,payload:ContractUpdate,user:User=Depends(require_permission("sales.create")),db:Session=Depends(get_db)):
     contract=org_obj(db,Contract,user,contract_id)
