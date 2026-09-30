@@ -42,7 +42,7 @@ def add_member(channel_id:UUID,payload:MemberAdd,user:User=Depends(require_permi
  if not channel: raise HTTPException(404,"Channel not found")
  member_user=db.scalar(select(User).where(User.id==payload.user_id,User.organization_id==user.organization_id,User.status=="active"))
  if not member_user: raise HTTPException(400,"User must belong to your organization and be active")
- if db.scalar(select(ChannelMember).where(ChannelMember.channel_id==channel.id,ChannelMember.user_id=payload.user_id)):
+ if db.scalar(select(ChannelMember).where(ChannelMember.channel_id==channel.id,ChannelMember.user_id==payload.user_id)):
   raise HTTPException(409,"User is already a channel member")
  db.add(ChannelMember(channel_id=channel.id,user_id=payload.user_id))
  record(db,user.organization_id,user.id,"add_member","communication_channel",channel.id,{"user_id":str(payload.user_id)})
