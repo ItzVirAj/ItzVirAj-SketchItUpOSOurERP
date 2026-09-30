@@ -8,6 +8,7 @@ from ..core.models import User
 from ..core.dependencies import require_permission
 from .models import Notification
 from .schemas import NotificationRead,NotificationReadUpdate
+from .automation import generate_overdue_notifications
 router=APIRouter()
 @router.get("",response_model=list[NotificationRead])
 def list_notifications(user:User=Depends(require_permission("notifications.read")),db:Session=Depends(get_db),unread_only:bool=False,limit:int=50):
@@ -23,3 +24,6 @@ def mark_read(notification_id:UUID,p:NotificationReadUpdate=NotificationReadUpda
 def mark_all_read(user:User=Depends(require_permission("notifications.read")),db:Session=Depends(get_db)):
  result=db.execute(update(Notification).where(Notification.organization_id==user.organization_id,Notification.user_id==user.id,Notification.is_read.is_(False)).values(is_read=True,read_at=datetime.now(timezone.utc)))
  db.commit();return {"updated":result.rowcount}
+@router.post("/generate-overdue")
+def generate_overdue(user:User=Depends(require_permission("notifications.create")),db:Session=Depends(get_db)):
+ return generate_overdue_notifications(db,user.organization_id)
