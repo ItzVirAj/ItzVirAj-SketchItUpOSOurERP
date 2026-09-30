@@ -24,7 +24,7 @@ def authenticate(token:str,db):
 
 def can_access(db,user,channel_id):
  channel=db.scalar(select(Channel).where(Channel.id==channel_id,Channel.organization_id==user.organization_id))
- if not channel:return None
+ if not channel or channel.archived_at is not None:return None
  if channel.channel_type=="public":return channel
  member=db.scalar(select(ChannelMember).where(ChannelMember.channel_id==channel.id,ChannelMember.user_id==user.id))
  return channel if member else None
