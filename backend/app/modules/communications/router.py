@@ -10,6 +10,7 @@ from ..core.audit import record
 from .models import Channel, ChannelMember, Message
 from .schemas import ChannelCreate, ChannelRead, MessageCreate, MessageRead, MemberAdd
 from ..notifications.service import create_notification
+from .realtime import manager
 
 router=APIRouter()
 
@@ -60,7 +61,7 @@ def list_messages(channel_id:UUID,user:User=Depends(require_permission("communic
  return db.scalars(q.order_by(Message.created_at.desc()).limit(limit)).all()
 
 @router.post("/channels/{channel_id}/messages",response_model=MessageRead,status_code=201)
-def send_message(channel_id:UUID,payload:MessageCreate,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
+async def send_message(channel_id:UUID,payload:MessageCreate,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
  channel=get_channel(db,user,channel_id)
  if not channel or not can_access(db,user,channel): raise HTTPException(404,"Channel not found")
  message=Message(organization_id=user.organization_id,channel_id=channel.id,sender_user_id=user.id,body=payload.body.strip())
@@ -75,7 +76,9 @@ def send_message(channel_id:UUID,payload:MessageCreate,user:User=Depends(require
  preview=message.body if len(message.body)<=120 else message.body[:117]+"..."
  for recipient_id in recipients:
   create_notification(db,user.organization_id,recipient_id,"communications.message",f"New message in #{channel.name}",f"{user.display_name}: {preview}","communication_message",message.id,f"/communications/channels/{channel.id}")
- db.commit();db.refresh(message);return message
+ db.commit();db.refresh(message)
+ await manager.broadcast(recipients,{"type":"message.created","channel_id":str(channel.id),"message":{"id":str(message.id),"sender_user_id":str(user.id),"body":message.body,"created_at":message.created_at.isoformat()}})
+ return message
 
 @router.patch("/messages/{message_id}",response_model=MessageRead)
 def edit_message(message_id:UUID,payload:MessageCreate,user:User=Depends(require_permission("communications.create")),db:Session=Depends(get_db)):
