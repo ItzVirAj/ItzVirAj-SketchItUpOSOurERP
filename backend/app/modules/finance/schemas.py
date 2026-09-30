@@ -21,6 +21,9 @@ class InvoiceCreate(BaseModel):
   if len(value)!=3: raise ValueError("Currency must be a 3-letter ISO code")
   return value
 
+class InvoiceStatusUpdate(BaseModel):
+ status:str
+
 class InvoiceRead(InvoiceCreate):
  id:UUID
  organization_id:UUID
