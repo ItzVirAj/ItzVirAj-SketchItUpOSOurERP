@@ -9,6 +9,7 @@ from ..core.dependencies import require_permission
 from ..core.audit import record
 from ..projects.models import Project
 from ..notifications.service import create_notification
+from ..marketing.models import Campaign
 from .models import Client,Contact,Lead,LeadActivity,LeadFollowUp,Pipeline,PipelineStage
 from .schemas import ClientCreate,ClientUpdate,ClientRead,ContactCreate,ContactRead,LeadCreate,LeadUpdate,LeadRead,ActivityCreate,ActivityRead,FollowUpCreate,FollowUpComplete,FollowUpRead,PipelineRead,StageRead,LeadConversionRead,LeadBulkStageUpdate
 
@@ -107,6 +108,8 @@ def create_lead(payload:LeadCreate,user:User=Depends(require_permission("crm.cre
     if not org_user(db,user,payload.owner_user_id): raise HTTPException(400,"Lead owner must belong to your organization")
     if stage.is_closed_lost and not payload.lost_reason: raise HTTPException(400,"Lost reason is required")
     if not stage.is_closed_won and not payload.next_follow_up_at: raise HTTPException(400,"Active leads require a next follow-up date")
+    if payload.campaign_id and not db.scalar(select(Campaign.id).where(Campaign.id==payload.campaign_id,Campaign.organization_id==user.organization_id)):
+        raise HTTPException(400,"Campaign must belong to your organization")
     if payload.client_id and not org_client(db,user,payload.client_id): raise HTTPException(400,"Client must belong to your organization")
     if payload.contact_id:
         contact=db.scalar(select(Contact).where(Contact.id==payload.contact_id,Contact.organization_id==user.organization_id))
@@ -131,6 +134,9 @@ def update_lead(lead_id:UUID,payload:LeadUpdate,user:User=Depends(require_permis
     if not stage.is_closed_won and not next_follow_up: raise HTTPException(400,"Active leads require a next follow-up date")
     lost_reason=data.get("lost_reason",lead.lost_reason)
     if stage.is_closed_lost and not lost_reason: raise HTTPException(400,"Lost reason is required")
+    campaign_id=data.get("campaign_id",lead.campaign_id)
+    if campaign_id and not db.scalar(select(Campaign.id).where(Campaign.id==campaign_id,Campaign.organization_id==user.organization_id)):
+        raise HTTPException(400,"Campaign must belong to your organization")
     client_id=data.get("client_id",lead.client_id)
     if client_id and not org_client(db,user,client_id): raise HTTPException(400,"Client must belong to your organization")
     contact_id=data.get("contact_id",lead.contact_id)
