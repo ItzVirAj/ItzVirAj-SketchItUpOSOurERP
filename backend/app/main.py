@@ -36,5 +36,7 @@ app.include_router(finance_router,prefix="/api/v1/finance",tags=["finance"])
 app.include_router(dashboard_router,prefix="/api/v1/dashboard",tags=["dashboard"])
 app.include_router(documents_router,prefix="/api/v1/documents",tags=["documents"])
 app.include_router(notifications_router,prefix="/api/v1/notifications",tags=["notifications"])
+app.include_router(communications_router,prefix="/api/v1/communications",tags=["communications"])
+app.include_router(communications_ws_router,prefix="/api/v1/communications",tags=["communications"])
 @app.get("/api/v1/health")
 def health(): return {"status":"ok","database":"configured"}
