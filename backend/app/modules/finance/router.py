@@ -77,6 +77,8 @@ def update_invoice_status(invoice_id:UUID,payload:InvoiceStatusUpdate,user:User=
  if payload.status not in allowed.get(current,set()): raise HTTPException(400,f"Invalid invoice transition: {current} -> {payload.status}")
  invoice.status=payload.status;invoice.updated_at=datetime.now(timezone.utc)
  record(db,user.organization_id,user.id,"status_change","invoice",invoice.id,{"from":current,"to":payload.status})
+ if invoice.created_by_user_id:
+  create_notification(db,user.organization_id,invoice.created_by_user_id,"finance.invoice_status","Invoice status changed",f"Invoice {invoice.invoice_number} moved from {current} to {payload.status}.","invoice",invoice.id,f"/finance/invoices/{invoice.id}")
  db.commit();db.refresh(invoice);return invoice
 
 @router.get("/invoices/{invoice_id}/balance")
