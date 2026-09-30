@@ -5,6 +5,7 @@ class Settings(BaseSettings):
  jwt_expire_minutes:int=60
  refresh_token_expire_days:int=30
  bootstrap_secret:str
+ redis_url:str|None=None
  storage_endpoint_url:str|None=None
  storage_bucket:str="sketchitup-documents"
  storage_access_key:str|None=None
