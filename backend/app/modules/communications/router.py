@@ -109,7 +109,7 @@ def remove_member(channel_id:UUID,member_user_id:UUID,user:User=Depends(require_
 
 @router.get("/channels/unread",response_model=list[ChannelUnreadRead])
 def channel_unread_counts(user:User=Depends(require_permission("communications.read")),db:Session=Depends(get_db)):
- channels=db.scalars(select(Channel).where(Channel.organization_id==user.organization_id).order_by(Channel.name.asc())).all()
+ channels=db.scalars(select(Channel).where(Channel.organization_id==user.organization_id,Channel.archived_at.is_(None)).order_by(Channel.name.asc())).all()
  visible=[]
  private_ids=[]
  for channel in channels:
