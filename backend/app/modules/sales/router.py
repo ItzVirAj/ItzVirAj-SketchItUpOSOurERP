@@ -46,6 +46,8 @@ def send_proposal(proposal_id:UUID,user:User=Depends(require_permission("sales.c
     proposal.status="sent"
     proposal.updated_at=datetime.now(timezone.utc)
     record(db,user.organization_id,user.id,"status_change","proposal",proposal.id,{"from":"draft_or_revised","to":"sent"})
+    if proposal.created_by_user_id:
+        create_notification(db,user.organization_id,proposal.created_by_user_id,"sales.proposal_sent","Proposal sent",f"Proposal {proposal.title} has been sent.","proposal",proposal.id,f"/sales/proposals/{proposal.id}")
     db.commit();db.refresh(proposal);return proposal
 
 @router.post("/proposals/{proposal_id}/accept",response_model=ContractRead,status_code=201)
