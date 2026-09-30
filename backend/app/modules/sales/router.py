@@ -8,7 +8,7 @@ from ..core.models import User
 from ..core.dependencies import require_permission
 from ..core.audit import record
 from .models import Proposal,Contract
-from .schemas import ProposalCreate,ProposalUpdate,ProposalRead,ContractCreate,ContractUpdate,ContractRead
+from .schemas import ProposalCreate,ProposalUpdate,ProposalRead,ContractCreate,ContractUpdate,ContractRead,ContractStatusUpdate
 
 router=APIRouter()
 
@@ -104,7 +104,7 @@ def create_contract(payload:ContractCreate,user:User=Depends(require_permission(
     db.add(contract);db.flush();record(db,user.organization_id,user.id,"create","contract",contract.id,{"title":contract.title});db.commit();db.refresh(contract);return contract
 
 @router.post("/contracts/{contract_id}/status",response_model=ContractRead)
-def update_contract_status(contract_id:UUID,status:str,user:User=Depends(require_permission("sales.create")),db:Session=Depends(get_db)):
+def update_contract_status(contract_id:UUID,payload:ContractStatusUpdate,user:User=Depends(require_permission("sales.create")),db:Session=Depends(get_db)):
     contract=org_obj(db,Contract,user,contract_id)
     if not contract: raise HTTPException(404,"Contract not found")
     allowed={
@@ -116,6 +116,7 @@ def update_contract_status(contract_id:UUID,status:str,user:User=Depends(require
         "terminated":set(),
     }
     current=contract.status
+    status=payload.status
     if status not in allowed.get(current,set()):
         raise HTTPException(400,f"Invalid contract transition: {current} -> {status}")
     if status=="signed" and not contract.signed_at:
